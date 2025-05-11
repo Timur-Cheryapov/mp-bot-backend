@@ -22,7 +22,7 @@ export const globalRateLimiter = rateLimit({
     res.status(429).json({
       status: 'error',
       message: 'Too many requests, please try again later.',
-      retryAfter: Math.ceil(15 * 60 / 60), // Return minutes to wait
+      retryAfter: Math.ceil(15), // Return minutes to wait
     });
   },
 });

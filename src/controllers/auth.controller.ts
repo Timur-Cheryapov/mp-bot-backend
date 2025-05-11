@@ -171,5 +171,25 @@ export const authController = {
     } catch (error) {
       next(error);
     }
+  },
+
+  /**
+   * Get user details endpoint
+   */
+  me: async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const user = req.user;
+      
+      if (!user) {
+        throw new UnauthorizedError('User not authenticated');
+      }
+      
+      return res.status(200).json({
+        message: 'User details retrieved successfully',
+        user
+      });
+    } catch (error) {
+      next(error);
+    }
   }
 }; 

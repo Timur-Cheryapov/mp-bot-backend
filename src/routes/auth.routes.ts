@@ -68,6 +68,13 @@ router.post('/reset-password', validate(emailValidation), asyncHandler(authContr
 router.post('/update-password', authenticate, csrfProtection, validate(passwordValidation), asyncHandler(authController.updatePassword));
 
 /**
+ * @route GET /api/auth/me
+ * @desc Get current user details
+ * @access Private
+ */
+router.get('/me', authenticate, asyncHandler(authController.me));
+
+/**
  * @route GET /api/auth/csrf-token
  * @desc Get a CSRF token for form submissions
  * @access Public

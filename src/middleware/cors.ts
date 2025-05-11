@@ -22,6 +22,7 @@ export const corsOptions = {
     'X-Requested-With',
     'Accept',
     'Origin',
+    'X-CSRF-Token',
   ],
   // Expose these response headers to the client
   exposedHeaders: ['Content-Length', 'X-Request-Id'],

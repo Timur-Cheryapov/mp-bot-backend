@@ -29,8 +29,8 @@ export const errorHandler = (
   // Determine if this is an operational error (expected) or programming error (unexpected)
   const isOperationalError = err instanceof AppError && err.isOperational;
   
-  // Status code (default to 500 internal server error if not provided)
-  const statusCode = (err as AppError).statusCode || res.statusCode !== 200 ? res.statusCode : 500;
+  // Get statusCode from the error if available, otherwise use the response statusCode if it's not 200, or default to 500
+  const statusCode = (err as AppError).statusCode || (res.statusCode !== 200 ? res.statusCode : 500);
   
   // Send detailed errors in development, less details in production
   const isDev = process.env.NODE_ENV === 'development';

@@ -30,6 +30,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     const { data, error } = await supabase.auth.getSession();
     
     if (error || !data.session) {
+      res.status(401);
       throw new UnauthorizedError('Authentication required');
     }
     
@@ -44,6 +45,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       path: req.originalUrl
     });
     
+    res.status(401);
     next(new UnauthorizedError('Authentication required'));
   }
 };
