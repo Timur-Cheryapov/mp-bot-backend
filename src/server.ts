@@ -57,6 +57,11 @@ app.get('/', (req, res) => {
   });
 });
 
+// Favicon route
+app.get('/favicon.ico', (req, res) => {
+  res.status(204).end();
+});
+
 // Error demonstration route
 app.get('/api/error-demo', (req, res, next) => {
   try {
