@@ -24,4 +24,7 @@ export {
   
   // Validation middleware
   validate,
-}; 
+};
+
+// Export auth middleware
+export * from './auth'; 

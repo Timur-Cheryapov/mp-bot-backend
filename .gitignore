@@ -69,3 +69,6 @@ tasks/
 .roo
 /scripts
 .cursorignore
+
+# db schema
+src/services/migrations/

@@ -13,6 +13,7 @@ import {
 } from './middleware';
 import logger from './utils/logger';
 import { BadRequestError } from './utils/errors';
+import apiRoutes from './routes';
 
 // Load environment variables
 dotenv.config();
@@ -47,6 +48,9 @@ app.use((req, res, next) => {
   logger.logRequest(req);
   next();
 });
+
+// API routes
+app.use('/api', apiRoutes);
 
 // Basic route for testing
 app.get('/', (req, res) => {
