@@ -2,6 +2,7 @@ import express from 'express';
 import { ChatOpenAI } from "@langchain/openai";
 import { HumanMessage } from "@langchain/core/messages";
 import dotenv from "dotenv";
+import cookieParser from 'cookie-parser';
 import {
   securityMiddleware,
   customSecurityHeaders,
@@ -10,6 +11,7 @@ import {
   errorHandler,
   notFoundHandler,
   asyncHandler,
+  handleCsrfError,
 } from './middleware';
 import logger from './utils/logger';
 import { BadRequestError } from './utils/errors';
@@ -23,7 +25,7 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 
 // Initialize express app
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 
 // Log the environment
 logger.info(`Server starting in ${NODE_ENV} mode...`);
@@ -42,6 +44,7 @@ app.use(globalRateLimiter);
 // 4. Body parsing middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser()); // Required for CSRF tokens
 
 // 5. Request logging
 app.use((req, res, next) => {
@@ -100,6 +103,9 @@ app.get('/api/joke', asyncHandler(async (req, res) => {
 
 // 404 handler for undefined routes - must come after all routes
 app.use(notFoundHandler);
+
+// CSRF error handler
+app.use(handleCsrfError);
 
 // Global error handler - must be the last middleware
 app.use(errorHandler);

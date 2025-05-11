@@ -67,8 +67,23 @@ export const authController = {
       const { data, error } = await authService.login(loginData);
       
       if (error) {
+        // Log failed login attempts with IP for security monitoring
+        logger.warn('Failed login attempt', {
+          email,
+          ip: req.ip,
+          userAgent: req.headers['user-agent'],
+          error: error.message
+        });
+        
         throw new UnauthorizedError('Invalid email or password');
       }
+      
+      // Log successful login
+      logger.info('User logged in successfully', {
+        userId: data.user?.id,
+        email: data.user?.email,
+        ip: req.ip
+      });
       
       // Return the user and session info
       return res.status(200).json({

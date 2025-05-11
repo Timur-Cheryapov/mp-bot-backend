@@ -1,6 +1,12 @@
 import { Router } from 'express';
 import { authController } from '../controllers/auth.controller';
-import { asyncHandler } from '../middleware';
+import { 
+  asyncHandler, 
+  authenticate, 
+  authRateLimiter, 
+  trackLoginAttempts,
+  csrfProtection
+} from '../middleware';
 import { validate } from '../middleware/validator';
 import { body } from 'express-validator';
 
@@ -31,21 +37,21 @@ const passwordValidation = [
  * @desc Register a new user
  * @access Public
  */
-router.post('/signup', validate(signupValidation), asyncHandler(authController.signup));
+router.post('/signup', authRateLimiter, csrfProtection, validate(signupValidation), asyncHandler(authController.signup));
 
 /**
  * @route POST /api/auth/login
  * @desc Authenticate user & get token
  * @access Public
  */
-router.post('/login', validate(loginValidation), asyncHandler(authController.login));
+router.post('/login', authRateLimiter, trackLoginAttempts, validate(loginValidation), asyncHandler(authController.login));
 
 /**
  * @route POST /api/auth/logout
  * @desc Logout user
  * @access Public
  */
-router.post('/logout', asyncHandler(authController.logout));
+router.post('/logout', csrfProtection, asyncHandler(authController.logout));
 
 /**
  * @route POST /api/auth/reset-password
@@ -59,6 +65,15 @@ router.post('/reset-password', validate(emailValidation), asyncHandler(authContr
  * @desc Update password (after reset)
  * @access Private
  */
-router.post('/update-password', validate(passwordValidation), asyncHandler(authController.updatePassword));
+router.post('/update-password', authenticate, csrfProtection, validate(passwordValidation), asyncHandler(authController.updatePassword));
+
+/**
+ * @route GET /api/auth/csrf-token
+ * @desc Get a CSRF token for form submissions
+ * @access Public
+ */
+router.get('/csrf-token', csrfProtection, (req, res) => {
+  res.json({ csrfToken: req.csrfToken() });
+});
 
 export default router; 

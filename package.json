@@ -24,7 +24,11 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.4",
+    "@types/cookie-parser": "^1.4.8",
+    "@types/csurf": "^1.11.5",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
+    "csurf": "^1.10.0",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "express-rate-limit": "^7.5.0",

@@ -1,5 +1,9 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import logger from '../utils/logger';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 // Define the types for our database tables
 export type User = {

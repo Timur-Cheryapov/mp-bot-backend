@@ -3,6 +3,8 @@ import { corsMiddleware } from './cors';
 import { globalRateLimiter, authRateLimiter } from './rateLimiter';
 import { errorHandler, notFoundHandler, asyncHandler } from './errorHandler';
 import { validate } from './validator';
+import { authenticate, requireAdmin, handleAuthError, trackLoginAttempts } from './auth';
+import { csrfProtection, handleCsrfError, csrfToken } from './csrf';
 
 // Export all middleware functions for easy import in server.ts
 export {
@@ -24,6 +26,17 @@ export {
   
   // Validation middleware
   validate,
+  
+  // Authentication middleware
+  authenticate,
+  requireAdmin,
+  handleAuthError,
+  trackLoginAttempts,
+  
+  // CSRF protection
+  csrfProtection,
+  handleCsrfError,
+  csrfToken,
 };
 
 // Export auth middleware
