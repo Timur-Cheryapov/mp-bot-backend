@@ -1,126 +1,85 @@
-import express from 'express';
+import express, { Request, Response } from 'express';
+import { getLangChainService } from '../services/langchain';
 import { asyncHandler } from '../middleware';
-import { getPromptService } from '../services/promptService';
-import { registerAllChains, ModelType } from '../prompts';
-import { BadRequestError } from '../utils/errors';
-import { getMemoryService } from '../services/memory';
-import { randomUUID } from 'crypto';
-
-// Initialize prompt service and register chains
-const promptService = getPromptService();
-const chains = registerAllChains();
-const memoryService = getMemoryService();
+import logger from '../utils/logger';
+import { v4 as uuidv4 } from 'uuid';
 
 const router = express.Router();
+const langchainService = getLangChainService();
 
-// Demo endpoint for general conversation
-router.post('/general', asyncHandler(async (req, res) => {
-  const { query, context = '' } = req.body;
-  
-  if (!query) {
-    throw new BadRequestError('Query is required');
+// Simplified conversation endpoint
+router.post('/conversation', asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const { 
+      message, 
+      systemPrompt = "You are a helpful assistant.", 
+      conversationId = req.body.conversationId === 'default' ? uuidv4() : req.body.conversationId,
+      history = [] 
+    } = req.body;
+
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    logger.info(`Processing conversation request for ID: ${conversationId}`);
+    
+    // Add the new user message to the history
+    const updatedHistory = [
+      ...history,
+      { role: 'user', content: message }
+    ];
+    
+    // Generate response from LangChain
+    const response = await langchainService.generateConversationResponse(
+      systemPrompt,
+      updatedHistory
+    );
+    
+    // Add the assistant response to the history
+    updatedHistory.push({ role: 'assistant', content: response });
+    
+    // Return the response and updated history
+    res.json({
+      response,
+      conversationId,
+      history: updatedHistory
+    });
+  } catch (error) {
+    logger.error(`Error in conversation endpoint: ${error instanceof Error ? error.message : String(error)}`);
+    res.status(500).json({ 
+      error: 'Failed to process conversation',
+      details: error instanceof Error ? error.message : String(error)
+    });
   }
-  
-  const result = await promptService.executeChain(
-    'general-conversation-1.0.0',
-    { query, context },
-    ModelType.GeneralPurpose
-  );
-  
-  res.json({ 
-    response: result,
-    promptType: 'general-conversation',
-  });
 }));
 
-// Demo endpoint for text summarization
-router.post('/summarize', asyncHandler(async (req, res) => {
-  const { 
-    text,
-    length = 'brief',
-    style = 'informative',
-    audience = 'general'
-  } = req.body;
-  
-  if (!text) {
-    throw new BadRequestError('Text to summarize is required');
-  }
-  
-  const result = await promptService.executeChain(
-    'text-summarization-1.0.0',
-    { text, length, style, audience },
-    ModelType.Summarization
-  );
-  
-  res.json({ 
-    response: result,
-    promptType: 'summarization',
-  });
-}));
+// Simple chat endpoint for single exchanges
+router.post('/chat', asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const { 
+      message, 
+      systemPrompt = "You are a helpful assistant."
+    } = req.body;
 
-// Demo endpoint for conversation with memory
-router.post('/conversation', asyncHandler(async (req, res) => {
-  const { 
-    message,
-    history = [],
-    systemPrompt = 'You are a helpful AI assistant.',
-    sessionId = randomUUID()
-  } = req.body;
-  
-  if (!message) {
-    throw new BadRequestError('Message is required');
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+    
+    // Generate response from LangChain
+    const response = await langchainService.generateChatResponse(
+      systemPrompt,
+      message
+    );
+    
+    // Return the response
+    res.json({ response });
+  } catch (error) {
+    logger.error(`Error in chat endpoint: ${error instanceof Error ? error.message : String(error)}`);
+    res.status(500).json({ 
+      error: 'Failed to process chat message',
+      details: error instanceof Error ? error.message : String(error)
+    });
   }
-  
-  // Convert history to our internal format if not already
-  const formattedHistory = Array.isArray(history) ? history : [];
-  
-  // Use the sessionId for memory persistence
-  const result = await promptService.executeConversation(
-    systemPrompt,
-    message,
-    {
-      history: formattedHistory,
-      variables: {}
-    },
-    sessionId
-  );
-  
-  // Get the updated history from memory
-  const updatedHistory = await memoryService.getHistory(sessionId);
-  
-  res.json({ 
-    response: result,
-    history: updatedHistory,
-    promptType: 'conversation',
-    sessionId // Return the sessionId so client can persist it
-  });
-}));
-
-// Add new endpoint to clear conversation memory
-router.post('/conversation/clear', asyncHandler(async (req, res) => {
-  const { sessionId } = req.body;
-  
-  if (!sessionId) {
-    throw new BadRequestError('Session ID is required');
-  }
-  
-  await memoryService.clearMemory(sessionId);
-  
-  res.json({ 
-    success: true,
-    message: 'Conversation memory cleared'
-  });
-}));
-
-// Add new endpoint to get memory metrics
-router.get('/memory/metrics', asyncHandler(async (req, res) => {
-  const { sessionId } = req.query;
-  
-  const metrics = memoryService.getMemoryMetrics(
-    sessionId ? String(sessionId) : undefined
-  );
-  
-  res.json(metrics);
 }));
 
 export default router; 

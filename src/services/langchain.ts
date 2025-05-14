@@ -1,24 +1,16 @@
 import { ChatOpenAI } from '@langchain/openai';
 import { OpenAIEmbeddings } from '@langchain/openai';
-import { 
-  ChatPromptTemplate, 
-  HumanMessagePromptTemplate,
-  SystemMessagePromptTemplate 
-} from '@langchain/core/prompts';
-import { InMemoryCache, BaseCache } from '@langchain/core/caches';
-import { Generation } from '@langchain/core/outputs';
+import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
 import logger from '../utils/logger';
 import { estimateTokenCount } from '../utils/langchainUtils';
 
 // Environment variables
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const CACHE_ENABLED = process.env.CACHE_ENABLED !== 'false'; // Default to true
 
 // Error messages
 const ERROR_MISSING_API_KEY = 'OpenAI API key is not defined in environment variables';
 const ERROR_INITIALIZATION = 'Failed to initialize LangChain service';
 const ERROR_MODEL_CREATION = 'Failed to create model instance';
-const ERROR_CACHE_INITIALIZATION = 'Failed to initialize cache';
 
 // Model configurations
 export const MODEL_CONFIGS = {
@@ -32,80 +24,31 @@ export const MODEL_CONFIGS = {
 export type ChatModelParams = {
   temperature?: number;
   maxTokens?: number;
-  model?: string;
-  disableCache?: boolean;
+  modelName?: string;
 };
 
 export type EmbeddingModelParams = {
   modelName?: string;
   stripNewLines?: boolean;
-  disableCache?: boolean;
 };
 
-// Cache metrics
-export interface CacheMetrics {
-  hits: number;
-  misses: number;
-  size: number;
-  tokensServedFromCache: number;
-  tokensSavedFromCache: number;
+// Simple metrics interface
+export interface TokenMetrics {
+  inputTokens: number;
+  outputTokens: number;
+  estimatedCost: number;
 }
 
 /**
- * Custom cache wrapper to track hit/miss metrics
- */
-class MetricsTrackingCache implements BaseCache<Generation[]> {
-  private cache: InMemoryCache;
-  private service: LangChainService;
-  
-  constructor(service: LangChainService) {
-    this.cache = new InMemoryCache();
-    this.service = service;
-  }
-  
-  async lookup(prompt: string, llmKey: string): Promise<Generation[] | null> {
-    const result = await this.cache.lookup(prompt, llmKey);
-    
-    if (result !== null) {
-      // Extract model name from llmKey if possible
-      // Format is typically: model_name:temperature:max_tokens
-      const modelName = llmKey.split(':')[0] || 'default';
-      
-      // Calculate total content length for all generations
-      const content = result.map(gen => gen.text).join(' ');
-      this.service.trackCacheHit(content, modelName);
-    } else {
-      this.service.trackCacheMiss();
-    }
-    
-    return result;
-  }
-  
-  async update(prompt: string, llmKey: string, value: Generation[]): Promise<void> {
-    return this.cache.update(prompt, llmKey, value);
-  }
-}
-
-/**
- * Singleton class for LangChain integration with OpenAI
+ * Simplified LangChain service
  */
 class LangChainService {
   private static instance: LangChainService;
   private initialized: boolean = false;
-  private connectionAttempts = 0;
-  private readonly MAX_RETRY_ATTEMPTS = 3;
   
-  // Cache implementation
-  private cache: BaseCache | null = null;
-  private cacheMetrics: CacheMetrics = {
-    hits: 0,
-    misses: 0,
-    size: 0, 
-    tokensServedFromCache: 0,
-    tokensSavedFromCache: 0
-  };
-  
-  // Token cost tracking (approximate)
+  // Token metrics tracking
+  private inputTokenCount: number = 0;
+  private outputTokenCount: number = 0;
   private cumulativeTokenCost: number = 0;
   
   // Approximate token costs per 1M tokens in USD for OpenAI models
@@ -140,39 +83,12 @@ class LangChainService {
       if (!OPENAI_API_KEY) {
         throw new Error(ERROR_MISSING_API_KEY);
       }
-      
-      // Initialize cache if enabled
-      if (CACHE_ENABLED) {
-        this.initializeCache();
-      } else {
-        logger.info('Cache is disabled by configuration');
-      }
 
       this.initialized = true;
       logger.info('LangChain service initialized successfully');
     } catch (error) {
-      this.connectionAttempts += 1;
-      
-      if (this.connectionAttempts < this.MAX_RETRY_ATTEMPTS) {
-        logger.warn(`LangChain initialization failed, retrying (${this.connectionAttempts}/${this.MAX_RETRY_ATTEMPTS})...`);
-        setTimeout(() => this.initialize(), 1000 * this.connectionAttempts);
-      } else {
-        logger.error(`${ERROR_INITIALIZATION}: ${error instanceof Error ? error.message : String(error)}`);
-        this.initialized = false;
-      }
-    }
-  }
-  
-  /**
-   * Initialize the in-memory cache
-   */
-  private initializeCache(): void {
-    try {
-      this.cache = new MetricsTrackingCache(this);
-      logger.info('Initialized metrics-tracking cache');
-    } catch (error) {
-      logger.error(`${ERROR_CACHE_INITIALIZATION}: ${error instanceof Error ? error.message : String(error)}`);
-      this.cache = null;
+      logger.error(`${ERROR_INITIALIZATION}: ${error instanceof Error ? error.message : String(error)}`);
+      this.initialized = false;
     }
   }
 
@@ -188,22 +104,16 @@ class LangChainService {
       const {
         temperature = 0.7,
         maxTokens = 2048,
-        model = MODEL_CONFIGS.GPT4O_MINI,
-        disableCache = false
+        modelName = MODEL_CONFIGS.GPT4O_MINI
       } = params;
       
       const modelConfig: any = {
         temperature,
         maxTokens,
-        model,
+        modelName,
         openAIApiKey: OPENAI_API_KEY,
         timeout: 30000, // 30 seconds timeout
       };
-      
-      // Apply cache if available and not disabled
-      if (this.cache && !disableCache && CACHE_ENABLED) {
-        modelConfig.cache = this.cache;
-      }
 
       return new ChatOpenAI(modelConfig);
     } catch (error) {
@@ -223,8 +133,7 @@ class LangChainService {
 
       const {
         modelName = MODEL_CONFIGS.TEXT_EMBEDDING_3_SMALL,
-        stripNewLines = true,
-        disableCache = false
+        stripNewLines = true
       } = params;
       
       const modelConfig: any = {
@@ -233,11 +142,6 @@ class LangChainService {
         openAIApiKey: OPENAI_API_KEY,
         timeout: 30000, // 30 seconds timeout
       };
-      
-      // Apply cache if available and not disabled
-      if (this.cache && !disableCache && CACHE_ENABLED) {
-        modelConfig.cache = this.cache;
-      }
 
       return new OpenAIEmbeddings(modelConfig);
     } catch (error) {
@@ -245,20 +149,88 @@ class LangChainService {
       throw new Error(`${ERROR_MODEL_CREATION}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-
+  
   /**
-   * Create a chat prompt template with system and human messages
+   * Generate a chat completion with basic message types
+   * @param systemPrompt The system instructions
+   * @param userMessage The user's message
+   * @param model Optional model name
+   * @returns The AI's response
    */
-  public createChatPromptTemplate(systemPrompt: string, humanPromptTemplate: string): ChatPromptTemplate {
-    const systemMessagePrompt = SystemMessagePromptTemplate.fromTemplate(systemPrompt);
-    const humanMessagePrompt = HumanMessagePromptTemplate.fromTemplate(humanPromptTemplate);
-    
-    return ChatPromptTemplate.fromMessages([
-      systemMessagePrompt,
-      humanMessagePrompt,
-    ]);
+  public async generateChatResponse(
+    systemPrompt: string,
+    userMessage: string,
+    modelName: string = MODEL_CONFIGS.GPT4O_MINI
+  ): Promise<string> {
+    try {
+      const chatModel = this.createChatModel({ modelName });
+      
+      const messages = [
+        new SystemMessage(systemPrompt),
+        new HumanMessage(userMessage)
+      ];
+      
+      // Track token usage for input
+      const inputText = `${systemPrompt}\n${userMessage}`;
+      
+      const response = await chatModel.invoke(messages);
+      const outputText = response.content.toString();
+      
+      // Track token usage
+      this.trackTokenUsage(inputText, outputText, modelName);
+      
+      return outputText;
+    } catch (error) {
+      logger.error(`Error generating chat response: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`Failed to generate response: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   
+  /**
+   * Generate a chat completion with conversation history
+   * @param systemPrompt The system instructions
+   * @param messages Array of conversation messages (role and content)
+   * @param model Optional model name
+   * @returns The AI's response
+   */
+  public async generateConversationResponse(
+    systemPrompt: string,
+    messages: Array<{role: string, content: string}>,
+    modelName: string = MODEL_CONFIGS.GPT4O_MINI
+  ): Promise<string> {
+    try {
+      const chatModel = this.createChatModel({ modelName });
+      
+      // Convert messages to LangChain format
+      const langchainMessages = [
+        new SystemMessage(systemPrompt),
+        ...messages.map(msg => {
+          if (msg.role === 'user') {
+            return new HumanMessage(msg.content);
+          } else if (msg.role === 'assistant') {
+            return new AIMessage(msg.content);
+          } else {
+            return new SystemMessage(msg.content);
+          }
+        })
+      ];
+      
+      // Track token usage for input
+      const inputText = [systemPrompt, ...messages.map(m => m.content)].join('\n');
+      
+      const response = await chatModel.invoke(langchainMessages);
+      const outputText = response.content.toString();
+      
+      // Track token usage
+      this.trackTokenUsage(inputText, outputText, modelName);
+      
+      return outputText;
+    } catch (error) {
+      logger.error(`Error generating conversation response: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`Failed to generate response: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   /**
    * Track token usage and cost 
    * @param inputText Input text
@@ -277,114 +249,37 @@ class LangChainService {
     const outputCost = (outputTokens / 1000000) * costRates.output;
     const totalCost = inputCost + outputCost;
     
-    // Accumulate total cost
+    // Update metrics
+    this.inputTokenCount += inputTokens;
+    this.outputTokenCount += outputTokens;
     this.cumulativeTokenCost += totalCost;
     
     logger.debug(`Token usage: ${inputTokens} input, ${outputTokens} output, $${totalCost.toFixed(6)} estimated cost`);
   }
   
   /**
-   * Track cached response
-   * @param text Cached text retrieved
-   * @param modelName Model name to calculate the cost savings
+   * Get usage metrics
    */
-  public trackCacheHit(text: string, modelName: string = 'default'): void {
-    this.cacheMetrics.hits += 1;
-    const tokens = estimateTokenCount(text);
-    this.cacheMetrics.tokensServedFromCache += tokens;
-    
-    // Get cost rates for the specified model or use default
-    const costRates = this.TOKEN_COSTS[modelName as keyof typeof this.TOKEN_COSTS] || this.TOKEN_COSTS.default;
-    const savedCost = (tokens / 1000000) * costRates.output;
-    this.cacheMetrics.tokensSavedFromCache += tokens;
-    
-    logger.debug(`Cache hit: Saved approximately ${tokens} tokens, $${savedCost.toFixed(6)} estimated for ${modelName}`);
-  }
-  
-  /**
-   * Track cache miss
-   */
-  public trackCacheMiss(): void {
-    this.cacheMetrics.misses += 1;
-  }
-  
-  /**
-   * Get cache and usage metrics
-   */
-  public getMetrics(): {
-    cache: CacheMetrics,
-    estimatedCost: number,
-    cacheHitRate: number
-  } {
-    const hitRate = this.cacheMetrics.hits / 
-      (this.cacheMetrics.hits + this.cacheMetrics.misses || 1);
-    
+  public getMetrics(): TokenMetrics {    
     return {
-      cache: { ...this.cacheMetrics },
-      estimatedCost: this.cumulativeTokenCost,
-      cacheHitRate: hitRate
+      inputTokens: this.inputTokenCount,
+      outputTokens: this.outputTokenCount,
+      estimatedCost: this.cumulativeTokenCost
     };
   }
 
   /**
-   * Verify connection to OpenAI API
-   * Returns true if the connection is successful, false otherwise
+   * Reset all metrics
    */
-  public async verifyConnection(): Promise<boolean> {
-    try {
-      if (!this.initialized) {
-        throw new Error(ERROR_INITIALIZATION);
-      }
-
-      const model = this.createChatModel({
-        temperature: 0,
-        maxTokens: 10,
-        disableCache: true // Don't cache the verification call
-      });
-
-      const prompt = this.createChatPromptTemplate(
-        'You are a helpful assistant.',
-        'Return only the word "Connected" without any explanation or additional text.'
-      );
-
-      const chain = prompt.pipe(model);
-      const response = await chain.invoke({ 
-        timeout: 5000 // 5 seconds timeout for verification
-      });
-
-      const text = response.content.toString().trim();
-      return text.toLowerCase().includes('connected');
-    } catch (error) {
-      logger.error(`Connection verification failed: ${error instanceof Error ? error.message : String(error)}`);
-      return false;
-    }
-  }
-  
-  /**
-   * Clear the cache
-   */
-  public async clearCache(): Promise<void> {
-    try {
-      // Reinitialize cache
-      this.initializeCache();
-      
-      // Reset metrics
-      this.cacheMetrics = {
-        hits: 0,
-        misses: 0,
-        size: 0,
-        tokensServedFromCache: 0,
-        tokensSavedFromCache: 0
-      };
-      
-      logger.info('Cache cleared successfully');
-    } catch (error) {
-      logger.error(`Error clearing cache: ${error instanceof Error ? error.message : String(error)}`);
-    }
+  public resetMetrics(): void {
+    this.inputTokenCount = 0;
+    this.outputTokenCount = 0;
+    this.cumulativeTokenCost = 0;
+    logger.info('Metrics reset successfully');
   }
 }
 
-// Export a function to get the singleton instance
+// Export function to get the singleton instance
 export const getLangChainService = (): LangChainService => {
   return LangChainService.getInstance();
 };

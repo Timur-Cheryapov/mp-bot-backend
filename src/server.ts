@@ -89,21 +89,13 @@ app.get('/api/error-demo', (req, res, next) => {
 // Example route using LangChain with async handler
 app.get('/api/joke', asyncHandler(async (req, res) => {
   const langchainService = getLangChainService();
-  const chat = langchainService.createChatModel({
-    temperature: 0.7,
-  });
-
-  const prompt = langchainService.createChatPromptTemplate(
-    'You are a helpful assistant who tells programming jokes.',
-    'Tell me a joke about {language}.'
-  );
-
-  const chain = prompt.pipe(chat);
-  const response = await chain.invoke({
-    language: req.query.language || 'TypeScript',
-  });
-
-  res.json({ joke: response.content.toString() });
+  
+  const systemPrompt = 'You are a helpful assistant who tells programming jokes.';
+  const userMessage = `Tell me a joke about ${req.query.language || 'TypeScript'}.`;
+  
+  const joke = await langchainService.generateChatResponse(systemPrompt, userMessage);
+  
+  res.json({ joke });
 }));
 
 // 404 handler for undefined routes - must come after all routes
