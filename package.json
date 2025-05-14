@@ -30,6 +30,8 @@
     "typescript": "^5.8.3"
   },
   "dependencies": {
+    "@langchain/core": "^0.3.55",
+    "@langchain/openai": "^0.5.10",
     "@supabase/supabase-js": "^2.49.4",
     "@types/cookie-parser": "^1.4.8",
     "@types/csurf": "^1.11.5",
@@ -42,6 +44,7 @@
     "express-validator": "^7.2.1",
     "helmet": "^8.1.0",
     "langchain": "^0.3.24",
+    "openai": "^4.98.0",
     "winston": "^3.17.0"
   }
 }

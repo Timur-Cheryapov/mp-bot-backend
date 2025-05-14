@@ -1,6 +1,4 @@
 import express from 'express';
-import { ChatOpenAI } from "@langchain/openai";
-import { HumanMessage } from "@langchain/core/messages";
 import dotenv from "dotenv";
 import cookieParser from 'cookie-parser';
 import {
@@ -16,6 +14,7 @@ import {
 import logger from './utils/logger';
 import { BadRequestError } from './utils/errors';
 import apiRoutes from './routes';
+import { getLangChainService } from './services/langchain';
 
 // Load environment variables
 dotenv.config();
@@ -89,16 +88,22 @@ app.get('/api/error-demo', (req, res, next) => {
 
 // Example route using LangChain with async handler
 app.get('/api/joke', asyncHandler(async (req, res) => {
-  const chat = new ChatOpenAI({
+  const langchainService = getLangChainService();
+  const chat = langchainService.createChatModel({
     temperature: 0.7,
-    openAIApiKey: process.env.OPENAI_API_KEY,
   });
 
-  const response = await chat.invoke([
-    new HumanMessage("Tell me a joke about TypeScript."),
-  ]);
+  const prompt = langchainService.createChatPromptTemplate(
+    'You are a helpful assistant who tells programming jokes.',
+    'Tell me a joke about {language}.'
+  );
 
-  res.json({ joke: response.text });
+  const chain = prompt.pipe(chat);
+  const response = await chain.invoke({
+    language: req.query.language || 'TypeScript',
+  });
+
+  res.json({ joke: response.content.toString() });
 }));
 
 // 404 handler for undefined routes - must come after all routes
