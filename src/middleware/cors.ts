@@ -8,7 +8,7 @@ export const corsOptions = {
   // Allow requests from these origins
   origin: [
     'http://localhost:3000',   // Local development frontend
-    'http://localhost:8000',   // Alternative local development port
+    'http://localhost:3001',   // Alternative local development port
     'https://mp-bot-frontend.vercel.app', // Production frontend (example)
   ],
   // Set to true if you want to allow credentials (cookies, authorization headers)
