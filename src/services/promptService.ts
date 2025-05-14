@@ -10,6 +10,7 @@ import {
   ModelType
 } from '../prompts/types';
 import { getLangChainService } from './langchain';
+import { getMemoryService } from './memory';
 import { estimateTokenCount, sanitizeText } from '../utils/langchainUtils';
 import logger from '../utils/logger';
 import {
@@ -39,6 +40,7 @@ class PromptService {
   private promptRegistry: Map<string, PromptTemplate> = new Map();
   private chainRegistry: Map<string, PromptChain> = new Map();
   private langchainService = getLangChainService();
+  private memoryService = getMemoryService();
   
   private constructor() {}
   
@@ -191,26 +193,6 @@ class PromptService {
   }
   
   /**
-   * Convert our conversation history to LangChain messages
-   * @param history Our conversation history format
-   * @returns Array of LangChain messages
-   */
-  public convertHistoryToMessages(history: ConversationHistory) {
-    return history.map(turn => {
-      switch (turn.role) {
-        case PromptType.System:
-          return new SystemMessage(turn.content);
-        case PromptType.User:
-          return new HumanMessage(turn.content);
-        case PromptType.Assistant:
-          return new AIMessage(turn.content);
-        default:
-          return new HumanMessage(turn.content);
-      }
-    });
-  }
-  
-  /**
    * Create a complete conversation chain with memory
    * @param systemPrompt The system prompt for the conversation
    * @param memoryVariableName The name to use for the memory placeholder
@@ -285,7 +267,8 @@ class PromptService {
   public async executeConversation(
     systemPrompt: string,
     userInput: string,
-    context: ConversationContext
+    context: ConversationContext,
+    sessionId: string = 'default'
   ): Promise<string> {
     try {
       // Create conversation chain with memory
@@ -304,15 +287,24 @@ class PromptService {
         outputParser
       ]);
       
-      // Convert our history format to LangChain messages
-      const messages = this.convertHistoryToMessages(context.history);
+      // Use the memory service to handle conversation history
+      if (context.history.length > 0) {
+        // Add existing history to memory if provided directly
+        await this.memoryService.addHistory(sessionId, context.history);
+      }
+      
+      // Load the conversation history from memory
+      const { chat_history } = await this.memoryService.loadMemory(sessionId);
       
       // Execute the chain
       const result = await chain.invoke({
-        chat_history: messages,
+        chat_history,
         input: userInput,
         ...context.variables
       });
+      
+      // Save the new exchange to memory
+      await this.memoryService.addExchange(sessionId, userInput, result);
       
       return result;
     } catch (error) {

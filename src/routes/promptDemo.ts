@@ -3,10 +3,13 @@ import { asyncHandler } from '../middleware';
 import { getPromptService } from '../services/promptService';
 import { registerAllChains, ModelType } from '../prompts';
 import { BadRequestError } from '../utils/errors';
+import { getMemoryService } from '../services/memory';
+import { randomUUID } from 'crypto';
 
 // Initialize prompt service and register chains
 const promptService = getPromptService();
 const chains = registerAllChains();
+const memoryService = getMemoryService();
 
 const router = express.Router();
 
@@ -60,7 +63,8 @@ router.post('/conversation', asyncHandler(async (req, res) => {
   const { 
     message,
     history = [],
-    systemPrompt = 'You are a helpful AI assistant.'
+    systemPrompt = 'You are a helpful AI assistant.',
+    sessionId = randomUUID()
   } = req.body;
   
   if (!message) {
@@ -70,27 +74,53 @@ router.post('/conversation', asyncHandler(async (req, res) => {
   // Convert history to our internal format if not already
   const formattedHistory = Array.isArray(history) ? history : [];
   
+  // Use the sessionId for memory persistence
   const result = await promptService.executeConversation(
     systemPrompt,
     message,
     {
       history: formattedHistory,
       variables: {}
-    }
+    },
+    sessionId
   );
   
-  // Add the new exchange to history
-  const updatedHistory = [
-    ...formattedHistory,
-    { role: 'user', content: message },
-    { role: 'assistant', content: result }
-  ];
+  // Get the updated history from memory
+  const updatedHistory = await memoryService.getHistory(sessionId);
   
   res.json({ 
     response: result,
     history: updatedHistory,
     promptType: 'conversation',
+    sessionId // Return the sessionId so client can persist it
   });
+}));
+
+// Add new endpoint to clear conversation memory
+router.post('/conversation/clear', asyncHandler(async (req, res) => {
+  const { sessionId } = req.body;
+  
+  if (!sessionId) {
+    throw new BadRequestError('Session ID is required');
+  }
+  
+  await memoryService.clearMemory(sessionId);
+  
+  res.json({ 
+    success: true,
+    message: 'Conversation memory cleared'
+  });
+}));
+
+// Add new endpoint to get memory metrics
+router.get('/memory/metrics', asyncHandler(async (req, res) => {
+  const { sessionId } = req.query;
+  
+  const metrics = memoryService.getMemoryMetrics(
+    sessionId ? String(sessionId) : undefined
+  );
+  
+  res.json(metrics);
 }));
 
 export default router; 
