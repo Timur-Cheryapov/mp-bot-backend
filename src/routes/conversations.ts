@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import { asyncHandler, authenticate } from '../middleware';
 import logger from '../utils/logger';
 import * as databaseService from '../services/database';
+import * as conversationService from '../services/conversationService';
 import { Conversation } from '../services/supabase';
 
 // Extend the Express Request type to include the conversation property
@@ -145,6 +146,80 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
   }
 }));
 
+/**
+ * Send a message to the AI and get a response in a conversation
+ * This endpoint handles:
+ * - Creating a new conversation if needed
+ * - Adding the user message to the conversation
+ * - Getting the AI response
+ * - Saving the response to the conversation
+ */
+router.post('/new', asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const userId = req.user.id;
+    const { 
+      message, 
+      conversationId = null, 
+      title = 'New Conversation',
+      systemPrompt = "You are a helpful assistant."
+    } = req.body;
+    
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+    
+    // Get or create the conversation
+    const conversation = await conversationService.getOrCreateConversation(
+      userId,
+      conversationId,
+      title,
+      systemPrompt
+    );
+    
+    // Generate response using the conversation service
+    const result = await conversationService.generateAndSaveResponse(
+      userId,
+      conversation.id,
+      message,
+      systemPrompt || conversation.system_prompt || "You are a helpful assistant."
+    );
+    
+    // Get the full conversation history after the new messages
+    const history = await conversationService.getConversationHistory(
+      conversation.id,
+      userId
+    );
+    
+    res.json({
+      conversation,
+      response: result.response,
+      history
+    });
+  } catch (error) {
+    logger.error(`Error in chat endpoint: ${error instanceof Error ? error.message : String(error)}`);
+    
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    
+    // Determine the appropriate error status code
+    if (errorMessage.includes('Access denied') || errorMessage.includes('permission')) {
+      return res.status(403).json({ 
+        error: 'Access denied',
+        details: errorMessage
+      });
+    } else if (errorMessage.includes('not found')) {
+      return res.status(404).json({ 
+        error: 'Not found',
+        details: errorMessage
+      });
+    }
+    
+    res.status(500).json({
+      error: 'Failed to process chat message',
+      details: errorMessage
+    });
+  }
+}));
+
 // Update a conversation's title
 router.patch('/:conversationId', validateConversationOwnership, asyncHandler(async (req: Request, res: Response) => {
   try {
@@ -210,6 +285,49 @@ router.delete('/:conversationId', validateConversationOwnership, asyncHandler(as
     logger.error(`Error deleting conversation: ${error instanceof Error ? error.message : String(error)}`);
     res.status(500).json({ 
       error: 'Failed to delete conversation',
+      details: error instanceof Error ? error.message : String(error)
+    });
+  }
+}));
+
+/**
+ * Add a message to an existing conversation and get an AI response
+ */
+router.post('/:conversationId', validateConversationOwnership, asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const { conversationId } = req.params;
+    const userId = req.user.id;
+    const { message } = req.body;
+    
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+    
+    // Get the conversation (already validated by middleware)
+    const conversation = req.conversation!;
+    
+    // Get the system prompt from the conversation
+    const systemPrompt = conversation.system_prompt || "You are a helpful assistant.";
+    
+    // Generate the response
+    const result = await conversationService.generateAndSaveResponse(
+      userId,
+      conversationId,
+      message,
+      systemPrompt
+    );
+    
+    // Get updated messages
+    const messages = await databaseService.getMessagesByConversationId(conversationId);
+    
+    res.json({
+      response: result.response,
+      messages
+    });
+  } catch (error) {
+    logger.error(`Error adding message to conversation: ${error instanceof Error ? error.message : String(error)}`);
+    res.status(500).json({ 
+      error: 'Failed to add message and generate response',
       details: error instanceof Error ? error.message : String(error)
     });
   }

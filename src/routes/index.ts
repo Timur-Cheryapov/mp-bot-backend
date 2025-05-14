@@ -14,6 +14,6 @@ router.use(csrfProtection);
 router.use('/auth', authRoutes);
 router.use('/prompt-demo', promptDemoRoutes);
 router.use('/metrics', metricsRoutes);
-router.use('/conversations', conversationsRoutes);
+router.use('/conversation', conversationsRoutes);
 
 export default router; 

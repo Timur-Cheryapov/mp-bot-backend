@@ -95,7 +95,7 @@ app.get('/api/joke', asyncHandler(async (req, res) => {
   
   const joke = await langchainService.generateChatResponse(systemPrompt, userMessage);
   
-  res.json({ joke });
+  res.json({ success: true, message: joke });
 }));
 
 // 404 handler for undefined routes - must come after all routes
