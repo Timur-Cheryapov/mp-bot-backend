@@ -1,9 +1,12 @@
 import express, { Request, Response } from 'express';
 import { getLangChainService } from '../services/langchain';
-import { asyncHandler } from '../middleware';
+import { asyncHandler, authenticate, requireAdmin } from '../middleware';
 
 const router = express.Router();
 const langchainService = getLangChainService();
+
+// Apply authentication to all metrics routes
+router.use(authenticate);
 
 // Get token usage metrics
 router.get('/', asyncHandler(async (req: Request, res: Response) => {

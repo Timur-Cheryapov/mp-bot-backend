@@ -170,14 +170,38 @@ class LangChainService {
         new HumanMessage(userMessage)
       ];
       
-      // Track token usage for input
-      const inputText = `${systemPrompt}\n${userMessage}`;
-      
+      // Get the response with token usage data
       const response = await chatModel.invoke(messages);
       const outputText = response.content.toString();
       
-      // Track token usage
-      this.trackTokenUsage(inputText, outputText, modelName);
+      // Extract token usage from response metadata
+      const responseAI = response as AIMessage;
+      
+      // Extract token usage from response metadata if available
+      if (responseAI && 
+          responseAI.response_metadata && 
+          responseAI.response_metadata.tokenUsage) {
+        const tokenUsage = responseAI.response_metadata.tokenUsage;
+        this.trackTokenUsageFromModel(
+          tokenUsage.promptTokens, 
+          tokenUsage.completionTokens, 
+          modelName
+        );
+      } else if (responseAI &&
+                responseAI.usage_metadata) {
+        // Alternative way to access token usage
+        const usageMetadata = responseAI.usage_metadata;
+        this.trackTokenUsageFromModel(
+          usageMetadata.input_tokens, 
+          usageMetadata.output_tokens, 
+          modelName
+        );
+      } else {
+        // Fall back to estimation if token usage is not available
+        const inputText = `${systemPrompt}\n${userMessage}`;
+        this.trackTokenUsage(inputText, outputText, modelName);
+        logger.warn('Token usage data not found in response, using estimation instead');
+      }
       
       return outputText;
     } catch (error) {
@@ -215,14 +239,38 @@ class LangChainService {
         })
       ];
       
-      // Track token usage for input
-      const inputText = [systemPrompt, ...messages.map(m => m.content)].join('\n');
-      
+      // Get the response with token usage data
       const response = await chatModel.invoke(langchainMessages);
       const outputText = response.content.toString();
       
-      // Track token usage
-      this.trackTokenUsage(inputText, outputText, modelName);
+      // Extract token usage from response metadata
+      const responseAI = response as AIMessage;
+      
+      // Extract token usage from response metadata if available
+      if (responseAI && 
+          responseAI.response_metadata && 
+          responseAI.response_metadata.tokenUsage) {
+        const tokenUsage = responseAI.response_metadata.tokenUsage;
+        this.trackTokenUsageFromModel(
+          tokenUsage.promptTokens, 
+          tokenUsage.completionTokens, 
+          modelName
+        );
+      } else if (responseAI &&
+                responseAI.usage_metadata) {
+        // Alternative way to access token usage
+        const usageMetadata = responseAI.usage_metadata;
+        this.trackTokenUsageFromModel(
+          usageMetadata.input_tokens, 
+          usageMetadata.output_tokens, 
+          modelName
+        );
+      } else {
+        // Fall back to estimation if token usage is not available
+        const inputText = [systemPrompt, ...messages.map(m => m.content)].join('\n');
+        this.trackTokenUsage(inputText, outputText, modelName);
+        logger.warn('Token usage data not found in response, using estimation instead');
+      }
       
       return outputText;
     } catch (error) {
@@ -232,7 +280,34 @@ class LangChainService {
   }
 
   /**
-   * Track token usage and cost 
+   * Track token usage using the token counts provided by the model
+   * @param promptTokens Number of tokens in the prompt
+   * @param completionTokens Number of tokens in the completion
+   * @param modelName Model name
+   */
+  public trackTokenUsageFromModel(promptTokens: number, completionTokens: number, modelName: string): void {
+    // Get cost rates for this model or use default
+    const hasModelSpecificRates = this.TOKEN_COSTS.hasOwnProperty(modelName);
+    const costRates = this.TOKEN_COSTS[modelName as keyof typeof this.TOKEN_COSTS] || this.TOKEN_COSTS.default;
+    
+    // Calculate cost (convert tokens to millions)
+    const inputCost = (promptTokens / 1000000) * costRates.input;
+    const outputCost = (completionTokens / 1000000) * costRates.output;
+    const totalCost = inputCost + outputCost;
+    
+    // Update metrics
+    this.inputTokenCount += promptTokens;
+    this.outputTokenCount += completionTokens;
+    this.cumulativeTokenCost += totalCost;
+    
+    logger.debug(
+      `Actual token usage: ${promptTokens} input, ${completionTokens} output, $${totalCost.toFixed(6)} cost ` + 
+      `(using ${hasModelSpecificRates ? modelName : 'default'} cost rates: $${costRates.input} input, $${costRates.output} output per 1M tokens)`
+    );
+  }
+
+  /**
+   * Track token usage and cost using estimation
    * @param inputText Input text
    * @param outputText Output text
    * @param modelName Model name
@@ -242,6 +317,7 @@ class LangChainService {
     const outputTokens = estimateTokenCount(outputText);
     
     // Get cost rates for this model or use default
+    const hasModelSpecificRates = this.TOKEN_COSTS.hasOwnProperty(modelName);
     const costRates = this.TOKEN_COSTS[modelName as keyof typeof this.TOKEN_COSTS] || this.TOKEN_COSTS.default;
     
     // Calculate cost (convert tokens to millions)
@@ -254,7 +330,10 @@ class LangChainService {
     this.outputTokenCount += outputTokens;
     this.cumulativeTokenCost += totalCost;
     
-    logger.debug(`Token usage: ${inputTokens} input, ${outputTokens} output, $${totalCost.toFixed(6)} estimated cost`);
+    logger.debug(
+      `Estimated token usage: ${inputTokens} input, ${outputTokens} output, $${totalCost.toFixed(6)} cost ` + 
+      `(using ${hasModelSpecificRates ? modelName : 'default'} cost rates: $${costRates.input} input, $${costRates.output} output per 1M tokens)`
+    );
   }
   
   /**
