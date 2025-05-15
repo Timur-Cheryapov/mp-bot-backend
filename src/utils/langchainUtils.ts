@@ -1,3 +1,5 @@
+import { AIMessage, SystemMessage, HumanMessage } from "@langchain/core/messages";
+
 /**
  * Calculate approximate token count (rough estimate)
  * @param text Input text
@@ -32,3 +34,15 @@ export function sanitizeText(text: string): string {
     .replace(/```/g, '\\`\\`\\`') // Escape backticks to prevent markdown code block interference
     .replace(/\n{3,}/g, '\n\n'); // Replace multiple newlines with just two
 } 
+
+/**
+ * Format messages from SystemMessage, HumanMessage, AIMessage to a basic format
+ * @param messages Array of messages
+ * @returns basicly formatted messages
+ */
+export function formatMessagesToBasic(messages: (SystemMessage | HumanMessage | AIMessage)[]): Array<{role: string, content: string}> {
+  return messages.map(msg => ({
+    role: msg instanceof AIMessage ? 'assistant' : msg instanceof HumanMessage ? 'user' : 'system',
+    content: msg.content.toString()
+  }));
+}

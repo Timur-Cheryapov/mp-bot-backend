@@ -2,7 +2,7 @@ import { ChatOpenAI } from '@langchain/openai';
 import { OpenAIEmbeddings } from '@langchain/openai';
 import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
 import logger from '../utils/logger';
-import { estimateTokenCount } from '../utils/langchainUtils';
+import { estimateTokenCount, formatMessagesToBasic } from '../utils/langchainUtils';
 
 // Environment variables
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -178,30 +178,7 @@ class LangChainService {
       const responseAI = response as AIMessage;
       
       // Extract token usage from response metadata if available
-      if (responseAI && 
-          responseAI.response_metadata && 
-          responseAI.response_metadata.tokenUsage) {
-        const tokenUsage = responseAI.response_metadata.tokenUsage;
-        this.trackTokenUsageFromModel(
-          tokenUsage.promptTokens, 
-          tokenUsage.completionTokens, 
-          modelName
-        );
-      } else if (responseAI &&
-                responseAI.usage_metadata) {
-        // Alternative way to access token usage
-        const usageMetadata = responseAI.usage_metadata;
-        this.trackTokenUsageFromModel(
-          usageMetadata.input_tokens, 
-          usageMetadata.output_tokens, 
-          modelName
-        );
-      } else {
-        // Fall back to estimation if token usage is not available
-        const inputText = `${systemPrompt}\n${userMessage}`;
-        this.trackTokenUsage(inputText, outputText, modelName);
-        logger.warn('Token usage data not found in response, using estimation instead');
-      }
+      this.trackTokenUsage(responseAI, systemPrompt, formatMessagesToBasic(messages), modelName);
       
       return outputText;
     } catch (error) {
@@ -246,37 +223,45 @@ class LangChainService {
       // Extract token usage from response metadata
       const responseAI = response as AIMessage;
       
-      // Extract token usage from response metadata if available
-      if (responseAI && 
-          responseAI.response_metadata && 
-          responseAI.response_metadata.tokenUsage) {
-        const tokenUsage = responseAI.response_metadata.tokenUsage;
-        this.trackTokenUsageFromModel(
-          tokenUsage.promptTokens, 
-          tokenUsage.completionTokens, 
-          modelName
-        );
-      } else if (responseAI &&
-                responseAI.usage_metadata) {
-        // Alternative way to access token usage
-        const usageMetadata = responseAI.usage_metadata;
-        this.trackTokenUsageFromModel(
-          usageMetadata.input_tokens, 
-          usageMetadata.output_tokens, 
-          modelName
-        );
-      } else {
-        // Fall back to estimation if token usage is not available
-        const inputText = [systemPrompt, ...messages.map(m => m.content)].join('\n');
-        this.trackTokenUsage(inputText, outputText, modelName);
-        logger.warn('Token usage data not found in response, using estimation instead');
-      }
+      // Extract token usage
+      this.trackTokenUsage(responseAI, systemPrompt, messages, modelName);
       
       return outputText;
     } catch (error) {
       logger.error(`Error generating conversation response: ${error instanceof Error ? error.message : String(error)}`);
       throw new Error(`Failed to generate response: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  /**
+   * Tracks token usage from response metadata
+   */
+  private trackTokenUsage(responseAI: AIMessage, systemPrompt: string, messages: Array<{role: string, content: string}>, modelName: string): void {
+    if (responseAI && 
+      responseAI.response_metadata && 
+      responseAI.response_metadata.tokenUsage) {
+    const tokenUsage = responseAI.response_metadata.tokenUsage;
+    this.trackTokenUsageFromModel(
+      tokenUsage.promptTokens, 
+      tokenUsage.completionTokens, 
+      modelName
+    );
+  } else if (responseAI &&
+            responseAI.usage_metadata) {
+    // Alternative way to access token usage
+    const usageMetadata = responseAI.usage_metadata;
+    this.trackTokenUsageFromModel(
+      usageMetadata.input_tokens, 
+      usageMetadata.output_tokens, 
+      modelName
+    );
+  } else {
+    // Fall back to estimation if token usage is not available
+    const inputText = [systemPrompt, ...messages.map(m => m.content)].join('\n');
+    const outputText = responseAI.content.toString();
+    this.trackTokenUsageEstimation(inputText, outputText, modelName);
+    logger.warn('Token usage data not found in response, using estimation instead');
+  }
   }
 
   /**
@@ -312,7 +297,7 @@ class LangChainService {
    * @param outputText Output text
    * @param modelName Model name
    */
-  public trackTokenUsage(inputText: string, outputText: string, modelName: string): void {
+  public trackTokenUsageEstimation(inputText: string, outputText: string, modelName: string): void {
     const inputTokens = estimateTokenCount(inputText);
     const outputTokens = estimateTokenCount(outputText);
     
