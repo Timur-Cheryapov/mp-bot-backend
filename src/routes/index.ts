@@ -3,7 +3,7 @@ import { csrfProtection } from '../middleware';
 import authRoutes from './auth.routes';
 import promptDemoRoutes from './promptDemo';
 import metricsRoutes from './metrics';
-import conversationsRoutes from './conversations';
+import conversationsRoutes from './conversation';
 
 const router = Router();
 
