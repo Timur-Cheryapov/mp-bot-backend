@@ -98,6 +98,7 @@ router.get('/:conversationId', validateConversationOwnership, asyncHandler(async
 }));
 
 // Create a new conversation
+/*
 router.post('/', asyncHandler(async (req: Request, res: Response) => {
   try {
     const userId = req.user.id;
@@ -145,6 +146,7 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
     });
   }
 }));
+*/
 
 /**
  * Send a message to the AI and get a response in a conversation
