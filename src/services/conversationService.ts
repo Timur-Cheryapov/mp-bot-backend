@@ -51,6 +51,7 @@ export async function getOrCreateConversation(
       {
         system_prompt: systemPrompt,
         model_name: 'gpt-4o-mini', // Default model from langchain.ts
+        context_length: 200_000, // For gpt-4o-mini
       }
     );
 
