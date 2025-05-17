@@ -5,6 +5,7 @@ import logger from '../utils/logger';
 import { estimateTokenCount, formatLangchainMessagesToBasic } from '../utils/langchainUtils';
 import { upsertDailyUsage } from './dailyUsage';
 import { DailyUsage } from './supabase';
+import { checkUserDailyUsage } from './userPlans';
 
 // Environment variables
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -154,27 +155,27 @@ class LangChainService {
   public async generateChatResponse(
     systemPrompt: string,
     userMessage: string,
-    userId?: string,
-    modelName: string = MODEL_CONFIGS.GPT4O_MINI
+    modelName: string = MODEL_CONFIGS.GPT4O_MINI,
+    userId?: string
   ): Promise<string> {
     try {
+      // Check if user has reached their token limit
+      if (userId) {
+        const usageCheck = await checkUserDailyUsage(userId);
+        if (usageCheck.hasReachedLimit) {
+          throw new Error(`Credit limit reached. Daily limit: $${usageCheck.dailyLimitCredits.toFixed(2)}, Monthly limit: $${usageCheck.monthlyLimitCredits.toFixed(2)}. Next reset: ${usageCheck.nextResetDate}`);
+        }
+      }
+
       const chatModel = this.createChatModel({ modelName });
-      
       const messages = [
         new SystemMessage(systemPrompt),
         new HumanMessage(userMessage)
       ];
-      
-      // Get the response with token usage data
       const response = await chatModel.invoke(messages);
       const outputText = response.content.toString();
-      
-      // Extract token usage from response metadata
       const responseAI = response as AIMessage;
-      
-      // Extract token usage from response metadata if available
       await this.trackTokenUsage(responseAI, systemPrompt, formatLangchainMessagesToBasic(messages), modelName, userId);
-      
       return outputText;
     } catch (error) {
       logger.error(`Error generating chat response: ${error instanceof Error ? error.message : String(error)}`);
@@ -193,36 +194,31 @@ class LangChainService {
   public async generateConversationResponse(
     systemPrompt: string,
     messages: Array<{role: string, content: string}>,
-    userId?: string,
-    modelName: string = MODEL_CONFIGS.GPT4O_MINI
+    modelName: string = MODEL_CONFIGS.GPT4O_MINI,
+    userId?: string
   ): Promise<string> {
     try {
+      // Check if user has reached their token limit
+      if (userId) {
+        const usageCheck = await checkUserDailyUsage(userId);
+        if (usageCheck.hasReachedLimit) {
+          throw new Error(`Credit limit reached. Daily limit: $${usageCheck.dailyLimitCredits.toFixed(2)}, Monthly limit: $${usageCheck.monthlyLimitCredits.toFixed(2)}. Next reset: ${usageCheck.nextResetDate}`);
+        }
+      }
+
       const chatModel = this.createChatModel({ modelName });
-      
-      // Convert messages to LangChain format
       const langchainMessages = [
         new SystemMessage(systemPrompt),
         ...messages.map(msg => {
-          if (msg.role === 'user') {
-            return new HumanMessage(msg.content);
-          } else if (msg.role === 'assistant') {
-            return new AIMessage(msg.content);
-          } else {
-            return new SystemMessage(msg.content);
-          }
+          if (msg.role === 'user') return new HumanMessage(msg.content);
+          if (msg.role === 'assistant') return new AIMessage(msg.content);
+          return new SystemMessage(msg.content);
         })
       ];
-      
-      // Get the response with token usage data
       const response = await chatModel.invoke(langchainMessages);
       const outputText = response.content.toString();
-      
-      // Extract token usage from response metadata
       const responseAI = response as AIMessage;
-      
-      // Extract token usage
       await this.trackTokenUsage(responseAI, systemPrompt, messages, modelName, userId);
-      
       return outputText;
     } catch (error) {
       logger.error(`Error generating conversation response: ${error instanceof Error ? error.message : String(error)}`);

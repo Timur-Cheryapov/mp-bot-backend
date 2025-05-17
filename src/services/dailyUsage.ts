@@ -98,13 +98,15 @@ export const upsertDailyUsage = async (
 // Get all daily usage records (optionally filtered)
 export const getAllDailyUsage = async (
   userId?: string,
-  date?: string
+  date?: string,
+  from?: string
 ): Promise<DailyUsage[]> => {
   try {
     const supabase = getSupabaseClient();
     let query = supabase.from('daily_usage').select('*');
     if (userId) query = query.eq('user_id', userId);
     if (date) query = query.eq('date', date);
+    if (from) query = query.gte('date', from);
     query = query.order('date', { ascending: false });
     const { data, error } = await query;
     if (error) throw error;

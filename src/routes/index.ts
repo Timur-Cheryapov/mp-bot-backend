@@ -4,6 +4,7 @@ import authRoutes from './auth.routes';
 import promptDemoRoutes from './promptDemo';
 import metricsRoutes from './metrics';
 import conversationsRoutes from './conversation';
+import plansRoutes from './plans';
 
 const router = Router();
 
@@ -15,5 +16,6 @@ router.use('/auth', authRoutes);
 router.use('/prompt-demo', promptDemoRoutes);
 router.use('/metrics', metricsRoutes);
 router.use('/conversation', conversationsRoutes);
+router.use('/plans', plansRoutes);
 
 export default router; 

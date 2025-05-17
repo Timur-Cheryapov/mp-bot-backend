@@ -51,6 +51,18 @@ export type DailyUsage = {
   updated_at: string;
 };
 
+export type UserPlan = {
+  id: string;
+  user_id: string;
+  plan_name: string;
+  max_credits_per_day: number;
+  max_credits_per_month: number;
+  reset_date: string; // YYYY-MM-DD
+  created_at: string;
+  updated_at: string;
+  active: boolean;
+};
+
 // Environment variables
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;

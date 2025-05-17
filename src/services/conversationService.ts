@@ -144,6 +144,7 @@ export async function generateAndSaveResponse(
     const response = await langchainService.generateConversationResponse(
       systemPrompt,
       history,
+      undefined,
       userId
     );
     
