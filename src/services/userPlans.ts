@@ -151,8 +151,6 @@ export const checkUserDailyUsage = async (userId: string): Promise<{
     
     // Calculate next reset date (same day, next month)
     const resetDate = new Date(plan.reset_date);
-    const nextResetDate = new Date(resetDate);
-    nextResetDate.setMonth(resetDate.getMonth() + 1);
     
     // Get daily and monthly usage
     const dailyUsage = await getAllDailyUsage(userId, today);
@@ -183,7 +181,7 @@ export const checkUserDailyUsage = async (userId: string): Promise<{
       monthlyUsageCredits,
       monthlyLimitCredits: Number(plan.max_credits_per_month),
       remainingMonthlyCredits,
-      nextResetDate: nextResetDate.toISOString().slice(0, 10)
+      nextResetDate: resetDate.toISOString().slice(0, 10)
     };
   } catch (error) {
     logger.error(`Failed to check user usage: ${error instanceof Error ? error.message : String(error)}`);
