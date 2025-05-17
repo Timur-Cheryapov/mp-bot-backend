@@ -68,8 +68,9 @@ router.put('/:userId', requireAdmin, asyncHandler(async (req: Request, res: Resp
   });
 }));
 
+// NOTE: Removed requireAdmin for development purposes
 // Update subscription (for use with payment system webhooks)
-router.post('/subscription', requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+router.post('/subscription', asyncHandler(async (req: Request, res: Response) => {
   const { userId, planName, maxCreditsPerDay, maxCreditsPerMonth } = req.body;
   
   // Validate required fields
