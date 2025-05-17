@@ -3,6 +3,7 @@ import { getLangChainService } from '../services/langchain';
 import { asyncHandler, authenticate } from '../middleware';
 import logger from '../utils/logger';
 import * as conversationService from '../services/conversationService';
+import { formatMessagesToBasic } from '../utils/langchainUtils';
 
 const router = express.Router();
 const langchainService = getLangChainService();
@@ -40,6 +41,7 @@ router.post('/conversation', authenticate, asyncHandler(async (req: Request, res
       let messageHistory = history.length > 0 
         ? history 
         : await conversationService.getConversationHistory(conversation.id, userId);
+      messageHistory = messageHistory.map(formatMessagesToBasic);
       
       // Add the new user message to the history
       const updatedHistory = [

@@ -1,4 +1,5 @@
 import { AIMessage, SystemMessage, HumanMessage } from "@langchain/core/messages";
+import { Message } from "../services/supabase";
 
 /**
  * Calculate approximate token count (rough estimate)
@@ -40,9 +41,21 @@ export function sanitizeText(text: string): string {
  * @param messages Array of messages
  * @returns basicly formatted messages
  */
-export function formatMessagesToBasic(messages: (SystemMessage | HumanMessage | AIMessage)[]): Array<{role: string, content: string}> {
+export function formatLangchainMessagesToBasic(messages: (SystemMessage | HumanMessage | AIMessage)[]): Array<{role: string, content: string}> {
   return messages.map(msg => ({
     role: msg instanceof AIMessage ? 'assistant' : msg instanceof HumanMessage ? 'user' : 'system',
     content: msg.content.toString()
+  }));
+}
+
+/**
+ * Format messages from SystemMessage, HumanMessage, AIMessage to a basic format
+ * @param messages Array of messages
+ * @returns basicly formatted messages
+ */
+export function formatMessagesToBasic(messages: Message[]): Array<{role: string, content: string}> {
+  return messages.map(msg => ({
+    role: msg.role,
+    content: msg.content
   }));
 }

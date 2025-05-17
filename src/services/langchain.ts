@@ -2,7 +2,7 @@ import { ChatOpenAI } from '@langchain/openai';
 import { OpenAIEmbeddings } from '@langchain/openai';
 import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
 import logger from '../utils/logger';
-import { estimateTokenCount, formatMessagesToBasic } from '../utils/langchainUtils';
+import { estimateTokenCount, formatLangchainMessagesToBasic } from '../utils/langchainUtils';
 
 // Environment variables
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -178,7 +178,7 @@ class LangChainService {
       const responseAI = response as AIMessage;
       
       // Extract token usage from response metadata if available
-      this.trackTokenUsage(responseAI, systemPrompt, formatMessagesToBasic(messages), modelName);
+      this.trackTokenUsage(responseAI, systemPrompt, formatLangchainMessagesToBasic(messages), modelName);
       
       return outputText;
     } catch (error) {

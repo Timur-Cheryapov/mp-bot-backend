@@ -4,6 +4,7 @@ import logger from '../utils/logger';
 import * as databaseService from '../services/database';
 import * as conversationService from '../services/conversationService';
 import { Conversation } from '../services/supabase';
+import { convertConversationToUi, convertMessageToUi } from '../utils/fromDbToUiConverters';
 
 // Extend the Express Request type to include the conversation property
 declare global {
@@ -58,7 +59,7 @@ router.get('/', asyncHandler(async (req: Request, res: Response) => {
   try {
     // Get user ID from authenticated session
     const userId = req.user.id;
-    const includeArchived = req.query.includeArchived === 'true';
+    const includeArchived = req.query.includeArchived === 'false';
     const limit = req.query.limit ? parseInt(req.query.limit as string) : 20;
     const offset = req.query.offset ? parseInt(req.query.offset as string) : 0;
     
@@ -68,7 +69,7 @@ router.get('/', asyncHandler(async (req: Request, res: Response) => {
       offset
     });
     
-    res.json({ conversations });
+    res.json({ conversations: conversations.map(convertConversationToUi) });
   } catch (error) {
     logger.error(`Error getting conversations: ${error instanceof Error ? error.message : String(error)}`);
     res.status(500).json({ 
@@ -83,10 +84,11 @@ router.get('/:conversationId', validateConversationOwnership, asyncHandler(async
   try {
     const { conversationId } = req.params;
     const messages = await databaseService.getMessagesByConversationId(conversationId);
+    const conversation = await databaseService.getConversationById(conversationId);
     
     res.json({ 
-      conversation: req.conversation,
-      messages
+      conversation: conversation ? convertConversationToUi(conversation) : null,
+      messages: messages.map(convertMessageToUi)
     });
   } catch (error) {
     logger.error(`Error getting conversation: ${error instanceof Error ? error.message : String(error)}`);
@@ -96,57 +98,6 @@ router.get('/:conversationId', validateConversationOwnership, asyncHandler(async
     });
   }
 }));
-
-// Create a new conversation
-/*
-router.post('/', asyncHandler(async (req: Request, res: Response) => {
-  try {
-    const userId = req.user.id;
-    const { 
-      title = 'New Conversation',
-      systemPrompt = "You are a helpful assistant.",
-      modelName,
-      temperature,
-      maxTokens,
-      contextLength,
-      metadata
-    } = req.body;
-    
-    // Skip the explicit user check since our authentication middleware already verified the user
-    // The user in auth.users exists if the token is valid and we can just trust this
-    const conversation = await databaseService.createConversation(
-      userId,
-      title,
-      {
-        system_prompt: systemPrompt,
-        model_name: modelName,
-        temperature,
-        max_tokens: maxTokens,
-        context_length: contextLength,
-        metadata
-      }
-    );
-    
-    res.status(201).json({ conversation });
-  } catch (error) {
-    logger.error(`Error creating conversation: ${error instanceof Error ? error.message : String(error)}`);
-    
-    // Check for foreign key constraint violation
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    if (errorMessage.includes('foreign key constraint') || errorMessage.includes('conversations_user_id_fkey')) {
-      return res.status(400).json({ 
-        error: 'Database constraint error',
-        details: 'There is an issue with the database schema. The conversations table should reference auth.users.id instead of a custom users table.'
-      });
-    }
-    
-    res.status(500).json({ 
-      error: 'Failed to create conversation',
-      details: errorMessage
-    });
-  }
-}));
-*/
 
 /**
  * Send a message to the AI and get a response in a conversation
@@ -193,9 +144,8 @@ router.post('/new', asyncHandler(async (req: Request, res: Response) => {
     );
     
     res.json({
-      conversation,
-      response: result.response,
-      history
+      conversation: convertConversationToUi(conversation),
+      messages: history.map(convertMessageToUi)
     });
   } catch (error) {
     logger.error(`Error in chat endpoint: ${error instanceof Error ? error.message : String(error)}`);
@@ -322,10 +272,7 @@ router.post('/:conversationId', validateConversationOwnership, asyncHandler(asyn
     // Get updated messages
     const messages = await databaseService.getMessagesByConversationId(conversationId);
     
-    res.json({
-      response: result.response,
-      messages
-    });
+    res.json({ messages: messages.map(convertMessageToUi) });
   } catch (error) {
     logger.error(`Error adding message to conversation: ${error instanceof Error ? error.message : String(error)}`);
     res.status(500).json({ 

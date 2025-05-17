@@ -103,17 +103,14 @@ export async function getConversationHistory(
   conversationId: string,
   userId: string,
   limit = 50
-): Promise<Array<{ role: string; content: string }>> {
+): Promise<Message[]> {
   try {
     // Validate user has access to the conversation
     await validateConversationAccess(conversationId, userId);
     
     const messages = await databaseService.getMessagesByConversationId(conversationId, limit);
     
-    return messages.map(msg => ({
-      role: msg.role,
-      content: msg.content
-    }));
+    return messages
   } catch (error) {
     logger.error(`Error in getConversationHistory: ${error instanceof Error ? error.message : String(error)}`);
     throw error; // Re-throw to allow the specific error to be handled by the route
