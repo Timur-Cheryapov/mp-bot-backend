@@ -26,6 +26,7 @@ export type Conversation = {
   max_tokens?: number;
   context_length?: number;
   is_archived?: boolean;
+  message_count?: number;
   metadata?: Record<string, any>;
 };
 

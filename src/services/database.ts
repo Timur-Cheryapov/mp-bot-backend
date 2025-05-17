@@ -143,6 +143,7 @@ export const createConversation = async (
     temperature?: number;
     max_tokens?: number;
     context_length?: number;
+    message_count?: number;
     metadata?: Record<string, any>;
   }
 ): Promise<Conversation> => {
