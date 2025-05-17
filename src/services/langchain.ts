@@ -3,6 +3,8 @@ import { OpenAIEmbeddings } from '@langchain/openai';
 import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
 import logger from '../utils/logger';
 import { estimateTokenCount, formatLangchainMessagesToBasic } from '../utils/langchainUtils';
+import { upsertDailyUsage } from './dailyUsage';
+import { DailyUsage } from './supabase';
 
 // Environment variables
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -32,12 +34,8 @@ export type EmbeddingModelParams = {
   stripNewLines?: boolean;
 };
 
-// Simple metrics interface
-export interface TokenMetrics {
-  inputTokens: number;
-  outputTokens: number;
-  estimatedCost: number;
-}
+// Replace TokenMetrics interface
+type TokenMetrics = Omit<DailyUsage, 'id' | 'created_at' | 'updated_at'>;
 
 /**
  * Simplified LangChain service
@@ -45,11 +43,6 @@ export interface TokenMetrics {
 class LangChainService {
   private static instance: LangChainService;
   private initialized: boolean = false;
-  
-  // Token metrics tracking
-  private inputTokenCount: number = 0;
-  private outputTokenCount: number = 0;
-  private cumulativeTokenCost: number = 0;
   
   // Approximate token costs per 1M tokens in USD for OpenAI models
   private readonly TOKEN_COSTS = {
@@ -155,11 +148,13 @@ class LangChainService {
    * @param systemPrompt The system instructions
    * @param userMessage The user's message
    * @param model Optional model name
+   * @param userId The user ID for usage tracking
    * @returns The AI's response
    */
   public async generateChatResponse(
     systemPrompt: string,
     userMessage: string,
+    userId?: string,
     modelName: string = MODEL_CONFIGS.GPT4O_MINI
   ): Promise<string> {
     try {
@@ -178,7 +173,7 @@ class LangChainService {
       const responseAI = response as AIMessage;
       
       // Extract token usage from response metadata if available
-      this.trackTokenUsage(responseAI, systemPrompt, formatLangchainMessagesToBasic(messages), modelName);
+      await this.trackTokenUsage(responseAI, systemPrompt, formatLangchainMessagesToBasic(messages), modelName, userId);
       
       return outputText;
     } catch (error) {
@@ -192,11 +187,13 @@ class LangChainService {
    * @param systemPrompt The system instructions
    * @param messages Array of conversation messages (role and content)
    * @param model Optional model name
+   * @param userId The user ID for usage tracking
    * @returns The AI's response
    */
   public async generateConversationResponse(
     systemPrompt: string,
     messages: Array<{role: string, content: string}>,
+    userId?: string,
     modelName: string = MODEL_CONFIGS.GPT4O_MINI
   ): Promise<string> {
     try {
@@ -224,7 +221,7 @@ class LangChainService {
       const responseAI = response as AIMessage;
       
       // Extract token usage
-      this.trackTokenUsage(responseAI, systemPrompt, messages, modelName);
+      await this.trackTokenUsage(responseAI, systemPrompt, messages, modelName, userId);
       
       return outputText;
     } catch (error) {
@@ -234,112 +231,81 @@ class LangChainService {
   }
 
   /**
-   * Tracks token usage from response metadata
+   * Tracks token usage from response metadata and updates DailyUsage
    */
-  private trackTokenUsage(responseAI: AIMessage, systemPrompt: string, messages: Array<{role: string, content: string}>, modelName: string): void {
-    if (responseAI && 
-      responseAI.response_metadata && 
-      responseAI.response_metadata.tokenUsage) {
-    const tokenUsage = responseAI.response_metadata.tokenUsage;
-    this.trackTokenUsageFromModel(
-      tokenUsage.promptTokens, 
-      tokenUsage.completionTokens, 
-      modelName
-    );
-  } else if (responseAI &&
-            responseAI.usage_metadata) {
-    // Alternative way to access token usage
-    const usageMetadata = responseAI.usage_metadata;
-    this.trackTokenUsageFromModel(
-      usageMetadata.input_tokens, 
-      usageMetadata.output_tokens, 
-      modelName
-    );
-  } else {
-    // Fall back to estimation if token usage is not available
-    const inputText = [systemPrompt, ...messages.map(m => m.content)].join('\n');
-    const outputText = responseAI.content.toString();
-    this.trackTokenUsageEstimation(inputText, outputText, modelName);
-    logger.warn('Token usage data not found in response, using estimation instead');
-  }
-  }
+  private async trackTokenUsage(
+    responseAI: AIMessage,
+    systemPrompt: string,
+    messages: Array<{role: string, content: string}>,
+    modelName: string,
+    userId?: string
+  ): Promise<void> {
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let isEstimated = false;
 
-  /**
-   * Track token usage using the token counts provided by the model
-   * @param promptTokens Number of tokens in the prompt
-   * @param completionTokens Number of tokens in the completion
-   * @param modelName Model name
-   */
-  public trackTokenUsageFromModel(promptTokens: number, completionTokens: number, modelName: string): void {
-    // Get cost rates for this model or use default
-    const hasModelSpecificRates = this.TOKEN_COSTS.hasOwnProperty(modelName);
-    const costRates = this.TOKEN_COSTS[modelName as keyof typeof this.TOKEN_COSTS] || this.TOKEN_COSTS.default;
-    
-    // Calculate cost (convert tokens to millions)
-    const inputCost = (promptTokens / 1000000) * costRates.input;
-    const outputCost = (completionTokens / 1000000) * costRates.output;
-    const totalCost = inputCost + outputCost;
-    
-    // Update metrics
-    this.inputTokenCount += promptTokens;
-    this.outputTokenCount += completionTokens;
-    this.cumulativeTokenCost += totalCost;
-    
-    logger.debug(
-      `Actual token usage: ${promptTokens} input, ${completionTokens} output, $${totalCost.toFixed(6)} cost ` + 
-      `(using ${hasModelSpecificRates ? modelName : 'default'} cost rates: $${costRates.input} input, $${costRates.output} output per 1M tokens)`
-    );
-  }
+    if (responseAI && responseAI.response_metadata && responseAI.response_metadata.tokenUsage) {
+      const tokenUsage = responseAI.response_metadata.tokenUsage;
+      inputTokens = tokenUsage.promptTokens;
+      outputTokens = tokenUsage.completionTokens;
+      logger.info(`Token usage from response metadata - Input: ${inputTokens}, Output: ${outputTokens}`);
+    } else if (responseAI && responseAI.usage_metadata) {
+      const usageMetadata = responseAI.usage_metadata;
+      inputTokens = usageMetadata.input_tokens;
+      outputTokens = usageMetadata.output_tokens;
+      logger.info(`Token usage from usage metadata - Input: ${inputTokens}, Output: ${outputTokens}`);
+    } else {
+      const inputText = [systemPrompt, ...messages.map(m => m.content)].join('\n');
+      const outputText = responseAI.content.toString();
+      inputTokens = estimateTokenCount(inputText);
+      outputTokens = estimateTokenCount(outputText);
+      isEstimated = true;
+      logger.warn(`Using estimated token counts - Input: ${inputTokens}, Output: ${outputTokens}`);
+    }
 
-  /**
-   * Track token usage and cost using estimation
-   * @param inputText Input text
-   * @param outputText Output text
-   * @param modelName Model name
-   */
-  public trackTokenUsageEstimation(inputText: string, outputText: string, modelName: string): void {
-    const inputTokens = estimateTokenCount(inputText);
-    const outputTokens = estimateTokenCount(outputText);
-    
-    // Get cost rates for this model or use default
-    const hasModelSpecificRates = this.TOKEN_COSTS.hasOwnProperty(modelName);
+    // Calculate cost
     const costRates = this.TOKEN_COSTS[modelName as keyof typeof this.TOKEN_COSTS] || this.TOKEN_COSTS.default;
-    
-    // Calculate cost (convert tokens to millions)
     const inputCost = (inputTokens / 1000000) * costRates.input;
     const outputCost = (outputTokens / 1000000) * costRates.output;
     const totalCost = inputCost + outputCost;
-    
-    // Update metrics
-    this.inputTokenCount += inputTokens;
-    this.outputTokenCount += outputTokens;
-    this.cumulativeTokenCost += totalCost;
-    
-    logger.debug(
-      `Estimated token usage: ${inputTokens} input, ${outputTokens} output, $${totalCost.toFixed(6)} cost ` + 
-      `(using ${hasModelSpecificRates ? modelName : 'default'} cost rates: $${costRates.input} input, $${costRates.output} output per 1M tokens)`
-    );
-  }
-  
-  /**
-   * Get usage metrics
-   */
-  public getMetrics(): TokenMetrics {    
-    return {
-      inputTokens: this.inputTokenCount,
-      outputTokens: this.outputTokenCount,
-      estimatedCost: this.cumulativeTokenCost
-    };
+
+    logger.info(`Cost calculation for ${modelName}. Total: $${totalCost.toFixed(6)} ${isEstimated ? '(Estimated)' : '(Actual)'}`);
+
+    // Upsert to daily_usage
+    if (userId) {
+      const today = new Date().toISOString().slice(0, 10);
+      await upsertDailyUsage(userId, today, modelName, inputTokens, outputTokens, totalCost);
+    }
   }
 
   /**
-   * Reset all metrics
+   * Get usage metrics for a user (today, all models)
    */
-  public resetMetrics(): void {
-    this.inputTokenCount = 0;
-    this.outputTokenCount = 0;
-    this.cumulativeTokenCost = 0;
-    logger.info('Metrics reset successfully');
+  public async getMetrics(userId: string, date?: string): Promise<TokenMetrics[]> {
+    // Import getAllDailyUsage dynamically to avoid circular deps
+    const { getAllDailyUsage } = await import('./dailyUsage');
+    const usage = await getAllDailyUsage(userId, date);
+    return usage.map(u => ({
+      user_id: u.user_id,
+      date: u.date,
+      input_tokens: u.input_tokens,
+      output_tokens: u.output_tokens,
+      model: u.model,
+      cost_usd: u.cost_usd
+    }));
+  }
+
+  /**
+   * Reset metrics for a user (set tokens/cost to 0 for today)
+   */
+  public async resetMetrics(userId: string): Promise<void> {
+    const today = new Date().toISOString().slice(0, 10);
+    // Get all models for today
+    const { getAllDailyUsage, upsertDailyUsage } = await import('./dailyUsage');
+    const usage = await getAllDailyUsage(userId, today);
+    await Promise.all(
+      usage.map(u => upsertDailyUsage(u.user_id, today, u.model, 0, 0, 0))
+    );
   }
 }
 

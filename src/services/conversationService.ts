@@ -147,7 +147,8 @@ export async function generateAndSaveResponse(
     // Generate response
     const response = await langchainService.generateConversationResponse(
       systemPrompt,
-      history
+      history,
+      userId
     );
     
     // Save assistant message

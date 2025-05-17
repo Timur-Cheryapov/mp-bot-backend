@@ -38,6 +38,18 @@ export type Message = {
   metadata?: Record<string, any>;
 };
 
+export type DailyUsage = {
+  id: string;
+  user_id: string;
+  date: string; // YYYY-MM-DD
+  input_tokens: number;
+  output_tokens: number;
+  model: string;
+  cost_usd: number;
+  created_at: string;
+  updated_at: string;
+};
+
 // Environment variables
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
