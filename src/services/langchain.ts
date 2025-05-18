@@ -156,7 +156,8 @@ class LangChainService {
     systemPrompt: string,
     userMessage: string,
     modelName: string = MODEL_CONFIGS.GPT4O_MINI,
-    userId?: string
+    userId?: string,
+    stream?: boolean
   ): Promise<string> {
     try {
       // Check if user has reached their token limit
@@ -172,9 +173,31 @@ class LangChainService {
         new SystemMessage(systemPrompt),
         new HumanMessage(userMessage)
       ];
-      const response = await chatModel.invoke(messages);
-      const outputText = response.content.toString();
-      const responseAI = response as AIMessage;
+
+      let outputText = '';
+      let responseAI: AIMessage;
+
+      if (stream) {
+        const stream = await chatModel.stream(messages);
+        const chunks = [];
+        for await (const chunk of stream) {
+          chunks.push(chunk);
+          console.log(`${chunk.content}|`);
+        }
+
+        outputText = chunks.reduce((acc, chunk) => acc.concat(chunk.content.toString()), '');
+
+        let finalChunk = chunks[0];
+        for (const chunk of chunks) {
+          finalChunk = finalChunk.concat(chunk);
+        }
+        responseAI = finalChunk as AIMessage;
+      } else {
+        const response = await chatModel.invoke(messages);
+        outputText = response.content.toString();
+        responseAI = response as AIMessage;
+      }
+
       await this.trackTokenUsage(responseAI, systemPrompt, formatLangchainMessagesToBasic(messages), modelName, userId);
       return outputText;
     } catch (error) {
