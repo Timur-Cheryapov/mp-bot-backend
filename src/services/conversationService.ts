@@ -6,23 +6,6 @@ import { Conversation, Message } from './supabase';
 const langchainService = getLangChainService();
 
 /**
- * Validates that a user has permission to access a conversation
- */
-async function validateConversationAccess(conversationId: string, userId: string): Promise<Conversation> {
-  const conversation = await databaseService.getConversationById(conversationId);
-  
-  if (!conversation) {
-    throw new Error('Conversation not found');
-  }
-  
-  if (conversation.user_id !== userId) {
-    throw new Error('Access denied: You do not have permission to access this conversation');
-  }
-  
-  return conversation;
-}
-
-/**
  * Get an existing conversation or create a new one
  */
 export async function getOrCreateConversation(
@@ -34,14 +17,18 @@ export async function getOrCreateConversation(
   try {
     // If conversation ID is provided and valid, try to get it
     if (conversationId) {
-      // Validate user has access to the conversation
-      const existingConversation = await validateConversationAccess(conversationId, userId);
+      const conversation = await databaseService.getConversationById(conversationId);
+
+      if (!conversation) {
+        throw new Error('Conversation not found');
+      }
       
       // Update the conversation's updated_at timestamp
       await databaseService.updateConversation(conversationId, {
         updated_at: new Date().toISOString()
       });
-      return existingConversation;
+
+      return conversation;
     }
 
     // Create a new conversation
@@ -71,13 +58,9 @@ export async function saveMessage(
   conversationId: string,
   content: string,
   role: 'user' | 'assistant',
-  userId: string,
   metadata?: Record<string, any>
 ): Promise<Message> {
   try {
-    // Validate user has access to the conversation
-    await validateConversationAccess(conversationId, userId);
-    
     const message = await databaseService.createMessage(
       conversationId,
       content,
@@ -97,15 +80,10 @@ export async function saveMessage(
  */
 export async function getConversationHistory(
   conversationId: string,
-  userId: string,
   limit = 50
 ): Promise<Message[]> {
   try {
-    // Validate user has access to the conversation
-    await validateConversationAccess(conversationId, userId);
-    
     const messages = await databaseService.getMessagesByConversationId(conversationId, limit);
-    
     return messages
   } catch (error) {
     logger.error(`Error in getConversationHistory: ${error instanceof Error ? error.message : String(error)}`);
@@ -123,9 +101,6 @@ export async function generateAndSaveResponse(
   systemPrompt: string
 ): Promise<{ response: string; conversationId: string }> {
   try {
-    // Validate user has access to the conversation
-    await validateConversationAccess(conversationId, userId);
-    
     // Save user message
     await databaseService.createMessage(
       conversationId,

@@ -40,7 +40,7 @@ router.post('/conversation', authenticate, asyncHandler(async (req: Request, res
       // If we have no history in the request but have a conversation ID, fetch history from DB
       let messageHistory = history.length > 0 
         ? history 
-        : await conversationService.getConversationHistory(conversation.id, userId);
+        : await conversationService.getConversationHistory(conversation.id);
       messageHistory = messageHistory.map(formatMessagesToBasic);
       
       // Add the new user message to the history
@@ -50,7 +50,7 @@ router.post('/conversation', authenticate, asyncHandler(async (req: Request, res
       ];
       
       // Save user message to database
-      await conversationService.saveMessage(conversation.id, message, 'user', userId);
+      await conversationService.saveMessage(conversation.id, message, 'user');
       
       // Generate response from LangChain
       const response = await langchainService.generateConversationResponse(
@@ -59,7 +59,7 @@ router.post('/conversation', authenticate, asyncHandler(async (req: Request, res
       );
       
       // Save assistant response to database
-      await conversationService.saveMessage(conversation.id, response, 'assistant', userId);
+      await conversationService.saveMessage(conversation.id, response, 'assistant');
       
       // Add the assistant response to the history
       updatedHistory.push({ role: 'assistant', content: response });
