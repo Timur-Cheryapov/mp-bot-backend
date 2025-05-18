@@ -1,5 +1,5 @@
 import express, { Request, Response } from 'express';
-import { asyncHandler, authenticate, requireAdmin } from '../middleware';
+import { asyncHandler, authenticate, requireAdmin, verifyPaymentSignature } from '../middleware';
 import * as userPlansService from '../services/userPlans';
 
 const router = express.Router();
@@ -91,7 +91,7 @@ router.put('/:userId', requireAdmin, asyncHandler(async (req: Request, res: Resp
 
 // NOTE: Removed requireAdmin for development purposes
 // Update subscription (for use with payment system webhooks)
-router.post('/subscription', asyncHandler(async (req: Request, res: Response) => {
+router.post('/subscription', verifyPaymentSignature, asyncHandler(async (req: Request, res: Response) => {
   const { userId, planId, planName, maxCreditsPerDay, maxCreditsPerMonth } = req.body;
   
   // Validate required fields
@@ -101,14 +101,14 @@ router.post('/subscription', asyncHandler(async (req: Request, res: Response) =>
     });
   }
 
-  //
+  // Check if the plan details match the plan details on the server
   if (
     planDetailsMap[planId].name != planName || 
     planDetailsMap[planId].creditsPerDay != maxCreditsPerDay || 
     planDetailsMap[planId].creditsPerMonth != maxCreditsPerMonth
   ) {
     return res.status(400).json({
-      error: 'Plan details do not match the plan details in the database'
+      error: 'Plan details do not match the plan details on the server'
     });
   }
   

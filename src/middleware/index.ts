@@ -5,6 +5,7 @@ import { errorHandler, notFoundHandler, asyncHandler } from './errorHandler';
 import { validate } from './validator';
 import { authenticate, requireAdmin, handleAuthError, trackLoginAttempts } from './auth';
 import { csrfProtection, handleCsrfError, csrfToken } from './csrf';
+import { verifyPaymentSignature } from './payment';
 
 // Export all middleware functions for easy import in server.ts
 export {
@@ -37,6 +38,9 @@ export {
   csrfProtection,
   handleCsrfError,
   csrfToken,
+  
+  // Payment middleware
+  verifyPaymentSignature,
 };
 
 // Export auth middleware
