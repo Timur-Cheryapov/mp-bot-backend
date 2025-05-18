@@ -22,11 +22,6 @@ export async function getOrCreateConversation(
       if (!conversation) {
         throw new Error('Conversation not found');
       }
-      
-      // Update the conversation's updated_at timestamp
-      await databaseService.updateConversation(conversationId, {
-        updated_at: new Date().toISOString()
-      });
 
       return conversation;
     }
