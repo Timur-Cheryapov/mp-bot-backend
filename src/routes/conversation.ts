@@ -19,6 +19,7 @@ declare global {
 }
 
 // Helper function to extract token usage from stream chunks
+// and simplify the stream to just send content chunks
 const createStreamProcessor = (conversationId: string) => {
   let buffer = '';
   
@@ -41,7 +42,7 @@ const createStreamProcessor = (conversationId: string) => {
       for (const event of events) {
         if (!event.trim()) continue;
         
-        // Look for on_chat_model_end event
+        // Look for on_chat_model_end event to extract token usage
         if (event.includes('event: data') && event.includes('"event":"on_chat_model_end"')) {
           try {
             // Parse the JSON data in the event
@@ -67,15 +68,54 @@ const createStreamProcessor = (conversationId: string) => {
                 // Store token usage in database (async, don't await)
                 conversationService.storeTokenUsage(conversationId, tokenUsage)
                   .catch(err => logger.error(`Error storing token usage: ${err}`));
+                
+                // Send an end event after processing the final chunk
+                this.push(Buffer.from(`event: end\ndata: {}\n\n`));
               }
             }
           } catch (err) {
             logger.error(`Error parsing stream event: ${err}`);
           }
+          
+          // Don't pass through the token usage event to the client
+          continue;
         }
         
-        // Always pass the event through
-        this.push(Buffer.from(event + '\n\n'));
+        // For content chunks, extract and simplify
+        if (event.includes('event: data') && event.includes('"event":"on_chat_model_stream"')) {
+          try {
+            // Parse the JSON data in the event
+            const dataMatch = event.match(/data: (.*)/);
+            if (dataMatch && dataMatch[1]) {
+              const eventData = JSON.parse(dataMatch[1]);
+              
+              // Extract content from the chunk
+              let content = '';
+              if (eventData.data?.chunk?.kwargs?.content) {
+                content = eventData.data.chunk.kwargs.content;
+                
+                // Send just the content as an SSE event
+                this.push(Buffer.from(`event: chunk\ndata: ${content}\n\n`));
+              }
+            }
+          } catch (err) {
+            logger.error(`Error parsing content chunk: ${err}`);
+          }
+          
+          // Don't pass through the original event
+          continue;
+        }
+        
+        // Special handling for end event
+        if (event.includes('event: end')) {
+          this.push(Buffer.from(`${event}\n\n`));
+          continue;
+        }
+        
+        // Pass through any other events unchanged (like conversationId)
+        if (!event.includes('"event":"on_chunk"') && !event.includes('"event":"on_chat_model_end"')) {
+          this.push(Buffer.from(`${event}\n\n`));
+        }
       }
       
       // Update buffer with any incomplete data
@@ -87,6 +127,10 @@ const createStreamProcessor = (conversationId: string) => {
       // Push any remaining data
       if (buffer) {
         this.push(Buffer.from(buffer));
+      }
+      // Always end with an end event if not already sent
+      if (!buffer.includes('event: end')) {
+        this.push(Buffer.from(`event: end\ndata: {}\n\n`));
       }
       callback();
     }
@@ -212,7 +256,7 @@ router.post('/new', asyncHandler(async (req: Request, res: Response) => {
             }
           });
           
-          // Create stream processor to extract token usage
+          // Create stream processor to extract token usage and simplify content
           const streamProcessor = createStreamProcessor(conversation.id);
           
           // Pipe the stream through processor to response
@@ -412,7 +456,7 @@ router.post('/:conversationId', asyncHandler(async (req: Request, res: Response)
             }
           });
           
-          // Create stream processor to extract token usage
+          // Create stream processor to extract token usage and simplify content
           const streamProcessor = createStreamProcessor(conversationId);
           
           // Pipe the stream through processor to response
