@@ -5,6 +5,9 @@ import * as databaseService from '../services/database';
 import * as conversationService from '../services/conversationService';
 import { Conversation } from '../services/supabase';
 import { convertConversationToUi, convertMessageToUi } from '../utils/fromDbToUiConverters';
+import { Readable } from 'stream';
+import { Transform } from 'stream';
+import { Buffer } from 'buffer';
 
 // Extend the Express Request type to include the conversation property
 declare global {
@@ -15,44 +18,85 @@ declare global {
   }
 }
 
+// Helper function to extract token usage from stream chunks
+const createStreamProcessor = (conversationId: string) => {
+  let buffer = '';
+  
+  return new Transform({
+    objectMode: true,
+    transform(chunk: Buffer, encoding, callback) {
+      // Convert the chunk to string and append to buffer
+      const chunkStr = chunk.toString();
+      buffer += chunkStr;
+      
+      // Process any complete events in the buffer
+      let processedBuffer = '';
+      const events = buffer.split('\n\n');
+      
+      // Keep the last item if it doesn't end with \n\n (incomplete)
+      if (!buffer.endsWith('\n\n') && events.length > 0) {
+        processedBuffer = events.pop() || '';
+      }
+      
+      for (const event of events) {
+        if (!event.trim()) continue;
+        
+        // Look for on_chat_model_end event
+        if (event.includes('event: data') && event.includes('"event":"on_chat_model_end"')) {
+          try {
+            // Parse the JSON data in the event
+            const dataMatch = event.match(/data: (.*)/);
+            if (dataMatch && dataMatch[1]) {
+              const eventData = JSON.parse(dataMatch[1]);
+              
+              // Extract token usage from the event data
+              let tokenUsage = null;
+              if (eventData.data?.output?.kwargs?.response_metadata?.usage) {
+                tokenUsage = eventData.data.output.kwargs.response_metadata.usage;
+              } else if (eventData.data?.output?.kwargs?.usage_metadata) {
+                tokenUsage = {
+                  prompt_tokens: eventData.data.output.kwargs.usage_metadata.input_tokens,
+                  completion_tokens: eventData.data.output.kwargs.usage_metadata.output_tokens,
+                  total_tokens: eventData.data.output.kwargs.usage_metadata.total_tokens
+                };
+              }
+              
+              if (tokenUsage) {
+                logger.info(`Token usage for conversation ${conversationId}: ${JSON.stringify(tokenUsage)}`);
+                
+                // Store token usage in database (async, don't await)
+                conversationService.storeTokenUsage(conversationId, tokenUsage)
+                  .catch(err => logger.error(`Error storing token usage: ${err}`));
+              }
+            }
+          } catch (err) {
+            logger.error(`Error parsing stream event: ${err}`);
+          }
+        }
+        
+        // Always pass the event through
+        this.push(Buffer.from(event + '\n\n'));
+      }
+      
+      // Update buffer with any incomplete data
+      buffer = processedBuffer;
+      callback();
+    },
+    
+    flush(callback) {
+      // Push any remaining data
+      if (buffer) {
+        this.push(Buffer.from(buffer));
+      }
+      callback();
+    }
+  });
+};
+
 const router = express.Router();
 
 // Apply authentication to all routes
 router.use(authenticate);
-
-/**
- * Middleware to validate conversation ownership
- */
-const validateConversationOwnership = asyncHandler(async (req: Request, res: Response, next: Function) => {
-  const { conversationId } = req.params;
-  const userId = req.user.id;
-  
-  if (!conversationId) {
-    return res.status(400).json({ error: 'Conversation ID is required' });
-  }
-  
-  try {
-    const conversation = await databaseService.getConversationById(conversationId);
-    
-    if (!conversation) {
-      return res.status(404).json({ error: 'Conversation not found' });
-    }
-    
-    if (conversation.user_id !== userId) {
-      return res.status(403).json({ error: 'Access denied to this conversation' });
-    }
-    
-    // Attach the conversation to the request for later use
-    req.conversation = conversation;
-    next();
-  } catch (error) {
-    logger.error(`Error validating conversation ownership: ${error instanceof Error ? error.message : String(error)}`);
-    res.status(500).json({ 
-      error: 'Failed to validate conversation access',
-      details: error instanceof Error ? error.message : String(error)
-    });
-  }
-});
 
 // Get all conversations for a user
 router.get('/', asyncHandler(async (req: Request, res: Response) => {
@@ -80,7 +124,7 @@ router.get('/', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 // Get a specific conversation with its messages
-router.get('/:conversationId', validateConversationOwnership, asyncHandler(async (req: Request, res: Response) => {
+router.get('/:conversationId', asyncHandler(async (req: Request, res: Response) => {
   try {
     const { conversationId } = req.params;
     const messages = await databaseService.getMessagesByConversationId(conversationId);
@@ -114,7 +158,8 @@ router.post('/new', asyncHandler(async (req: Request, res: Response) => {
       message, 
       conversationId = null, 
       title = 'New Conversation',
-      systemPrompt = "You are a helpful assistant."
+      systemPrompt = "You are a helpful assistant.",
+      stream = false
     } = req.body;
     
     if (!message) {
@@ -134,13 +179,55 @@ router.post('/new', asyncHandler(async (req: Request, res: Response) => {
       userId,
       conversation.id,
       message,
-      systemPrompt || conversation.system_prompt || "You are a helpful assistant."
+      systemPrompt || conversation.system_prompt || "You are a helpful assistant.",
+      stream
     );
     
+    // If streaming, return the stream response
+    if (stream) {
+      
+      // Set response headers
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+
+      res.write(`event: conversationId\ndata: ${conversation.id}\n\n`);
+      // Check if result.response is a Response object
+      if (result.response instanceof Response) {
+        // Create a readable stream from the response body
+        const responseBody = result.response.body;
+        if (responseBody) {
+          const reader = responseBody.getReader();
+          const readableStream = new Readable({
+            read() {
+              reader.read().then(({ done, value }) => {
+                if (done) {
+                  this.push(null);
+                } else {
+                  this.push(value);
+                }
+              }).catch(err => {
+                this.destroy(err);
+              });
+            }
+          });
+          
+          // Create stream processor to extract token usage
+          const streamProcessor = createStreamProcessor(conversation.id);
+          
+          // Pipe the stream through processor to response
+          readableStream
+            .pipe(streamProcessor)
+            .pipe(res);
+          return;
+        }
+      }
+    }
+    
+    // For non-streaming responses, return the conversation data
     // Get the full conversation history after the new messages
     const history = await conversationService.getConversationHistory(
-      conversation.id,
-      userId
+      conversation.id
     );
     
     res.json({
@@ -172,8 +259,32 @@ router.post('/new', asyncHandler(async (req: Request, res: Response) => {
   }
 }));
 
+/**
+ * Save a completed streamed response to the database
+ */
+router.post('/:conversationId/save-stream', asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const { conversationId } = req.params;
+    const { content } = req.body;
+    
+    if (!content) {
+      return res.status(400).json({ error: 'Content is required' });
+    }
+    
+    await conversationService.saveStreamedResponse(conversationId, content);
+    
+    res.json({ success: true, conversationId });
+  } catch (error) {
+    logger.error(`Error saving streamed response: ${error instanceof Error ? error.message : String(error)}`);
+    res.status(500).json({ 
+      error: 'Failed to save streamed response',
+      details: error instanceof Error ? error.message : String(error)
+    });
+  }
+}));
+
 // Update a conversation's title
-router.patch('/:conversationId', validateConversationOwnership, asyncHandler(async (req: Request, res: Response) => {
+router.patch('/:conversationId', asyncHandler(async (req: Request, res: Response) => {
   try {
     const { conversationId } = req.params;
     const { title } = req.body;
@@ -195,7 +306,7 @@ router.patch('/:conversationId', validateConversationOwnership, asyncHandler(asy
 }));
 
 // Archive a conversation
-router.post('/:conversationId/archive', validateConversationOwnership, asyncHandler(async (req: Request, res: Response) => {
+router.post('/:conversationId/archive', asyncHandler(async (req: Request, res: Response) => {
   try {
     const { conversationId } = req.params;
     await databaseService.archiveConversation(conversationId);
@@ -211,7 +322,7 @@ router.post('/:conversationId/archive', validateConversationOwnership, asyncHand
 }));
 
 // Unarchive a conversation
-router.post('/:conversationId/unarchive', validateConversationOwnership, asyncHandler(async (req: Request, res: Response) => {
+router.post('/:conversationId/unarchive', asyncHandler(async (req: Request, res: Response) => {
   try {
     const { conversationId } = req.params;
     await databaseService.unarchiveConversation(conversationId);
@@ -227,7 +338,7 @@ router.post('/:conversationId/unarchive', validateConversationOwnership, asyncHa
 }));
 
 // Delete a conversation
-router.delete('/:conversationId', validateConversationOwnership, asyncHandler(async (req: Request, res: Response) => {
+router.delete('/:conversationId', asyncHandler(async (req: Request, res: Response) => {
   try {
     const { conversationId } = req.params;
     await databaseService.deleteConversation(conversationId);
@@ -245,18 +356,22 @@ router.delete('/:conversationId', validateConversationOwnership, asyncHandler(as
 /**
  * Add a message to an existing conversation and get an AI response
  */
-router.post('/:conversationId', validateConversationOwnership, asyncHandler(async (req: Request, res: Response) => {
+router.post('/:conversationId', asyncHandler(async (req: Request, res: Response) => {
   try {
     const { conversationId } = req.params;
     const userId = req.user.id;
-    const { message } = req.body;
+    const { message, stream = false } = req.body;
     
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
     }
     
     // Get the conversation (already validated by middleware)
-    const conversation = req.conversation!;
+    const conversation = await databaseService.getConversationById(conversationId);
+
+    if (!conversation) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
     
     // Get the system prompt from the conversation
     const systemPrompt = conversation.system_prompt || "You are a helpful assistant.";
@@ -266,9 +381,50 @@ router.post('/:conversationId', validateConversationOwnership, asyncHandler(asyn
       userId,
       conversationId,
       message,
-      systemPrompt
+      systemPrompt,
+      stream
     );
     
+    // If streaming, return the stream response
+    if (stream) {
+      // Check if result.response is a Response object
+      if (result.response instanceof Response) {
+        // Set response headers
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        
+        // Create a readable stream from the response body
+        const responseBody = result.response.body;
+        if (responseBody) {
+          const reader = responseBody.getReader();
+          const readableStream = new Readable({
+            read() {
+              reader.read().then(({ done, value }) => {
+                if (done) {
+                  this.push(null);
+                } else {
+                  this.push(value);
+                }
+              }).catch(err => {
+                this.destroy(err);
+              });
+            }
+          });
+          
+          // Create stream processor to extract token usage
+          const streamProcessor = createStreamProcessor(conversationId);
+          
+          // Pipe the stream through processor to response
+          readableStream
+            .pipe(streamProcessor)
+            .pipe(res);
+          return;
+        }
+      }
+    }
+    
+    // For non-streaming responses, return the conversation messages
     // Get updated messages
     const messages = await databaseService.getMessagesByConversationId(conversationId);
     

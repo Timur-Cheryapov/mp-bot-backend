@@ -59,7 +59,7 @@ router.post('/conversation', authenticate, asyncHandler(async (req: Request, res
       );
       
       // Save assistant response to database
-      await conversationService.saveMessage(conversation.id, response, 'assistant');
+      await conversationService.saveMessage(conversation.id, response.toString(), 'assistant');
       
       // Add the assistant response to the history
       updatedHistory.push({ role: 'assistant', content: response });

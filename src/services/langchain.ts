@@ -6,6 +6,7 @@ import { estimateTokenCount, formatLangchainMessagesToBasic } from '../utils/lan
 import { upsertDailyUsage } from './dailyUsage';
 import { DailyUsage } from './supabase';
 import { checkUserDailyUsage } from './userPlans';
+import { StringOutputParser } from '@langchain/core/output_parsers';
 
 // Environment variables
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -218,8 +219,9 @@ class LangChainService {
     systemPrompt: string,
     messages: Array<{role: string, content: string}>,
     modelName: string = MODEL_CONFIGS.GPT4O_MINI,
-    userId?: string
-  ): Promise<string> {
+    userId?: string,
+    stream?: boolean
+  ): Promise<string | Response> {
     try {
       // Check if user has reached their token limit
       if (userId) {
@@ -238,11 +240,29 @@ class LangChainService {
           return new SystemMessage(msg.content);
         })
       ];
-      const response = await chatModel.invoke(langchainMessages);
-      const outputText = response.content.toString();
-      const responseAI = response as AIMessage;
-      await this.trackTokenUsage(responseAI, systemPrompt, messages, modelName, userId);
-      return outputText;
+
+      if (stream) {
+        const eventStream = await chatModel.streamEvents(
+          langchainMessages,
+          { 
+            version: 'v2',
+            encoding: 'text/event-stream'
+          },
+          { includeTypes: ["chat_model"]}
+        );
+
+        return new Response(eventStream, {
+          headers: {
+            'Content-Type': 'text/event-stream'
+          }
+        });
+      } else {
+        const response = await chatModel.invoke(langchainMessages);
+        const outputText = response.content.toString();
+        const responseAI = response as AIMessage;
+        await this.trackTokenUsage(responseAI, systemPrompt, messages, modelName, userId);
+        return outputText;
+      }
     } catch (error) {
       logger.error(`Error generating conversation response: ${error instanceof Error ? error.message : String(error)}`);
       throw new Error(`Failed to generate response: ${error instanceof Error ? error.message : String(error)}`);

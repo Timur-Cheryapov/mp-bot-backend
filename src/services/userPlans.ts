@@ -171,7 +171,7 @@ export const checkUserDailyUsage = async (userId: string): Promise<{
     // Check if either limit has been reached
     const hasReachedLimit = remainingDailyCredits <= 0 || remainingMonthlyCredits <= 0;
 
-    logger.info(`User ${userId} has left ${remainingDailyCredits} daily credits and ${remainingMonthlyCredits} monthly credits`);
+    // logger.info(`User ${userId} has left ${remainingDailyCredits} daily credits and ${remainingMonthlyCredits} monthly credits`);
     
     return {
       hasReachedLimit,
