@@ -4,6 +4,27 @@ import * as userPlansService from '../services/userPlans';
 
 const router = express.Router();
 
+/**
+ * Plan details lookup by plan ID
+ */
+export const planDetailsMap: Record<string, { name: string; creditsPerDay: number; creditsPerMonth: number }> = {
+  free: {
+    name: "Free",
+    creditsPerDay: 10,
+    creditsPerMonth: 200
+  },
+  standard: {
+    name: "Standard",
+    creditsPerDay: 50,
+    creditsPerMonth: 1000
+  },
+  premium: {
+    name: "Premium",
+    creditsPerDay: 200,
+    creditsPerMonth: 5000
+  }
+};
+
 // Apply authentication to all plan routes
 router.use(authenticate);
 
@@ -71,12 +92,23 @@ router.put('/:userId', requireAdmin, asyncHandler(async (req: Request, res: Resp
 // NOTE: Removed requireAdmin for development purposes
 // Update subscription (for use with payment system webhooks)
 router.post('/subscription', asyncHandler(async (req: Request, res: Response) => {
-  const { userId, planName, maxCreditsPerDay, maxCreditsPerMonth } = req.body;
+  const { userId, planId, planName, maxCreditsPerDay, maxCreditsPerMonth } = req.body;
   
   // Validate required fields
   if (!userId || !planName || maxCreditsPerDay === undefined || maxCreditsPerMonth === undefined) {
     return res.status(400).json({
       error: 'Missing required fields: userId, planName, maxCreditsPerDay, maxCreditsPerMonth'
+    });
+  }
+
+  //
+  if (
+    planDetailsMap[planId].name != planName || 
+    planDetailsMap[planId].creditsPerDay != maxCreditsPerDay || 
+    planDetailsMap[planId].creditsPerMonth != maxCreditsPerMonth
+  ) {
+    return res.status(400).json({
+      error: 'Plan details do not match the plan details in the database'
     });
   }
   
