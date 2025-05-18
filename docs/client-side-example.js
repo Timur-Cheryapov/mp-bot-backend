@@ -1,4 +1,4 @@
-// Example client-side code for handling the simplified stream
+// Example client-side code for handling the simplified stream with preserved newlines
 
 async function streamChat(message, conversationId = null, callbacks = {}) {
   // Default callbacks
@@ -42,7 +42,7 @@ async function streamChat(message, conversationId = null, callbacks = {}) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     
-    // Process the stream chunks - SIMPLIFIED VERSION
+    // Process the stream chunks
     while (true) {
       const { done, value } = await reader.read();
       
@@ -78,9 +78,18 @@ async function streamChat(message, conversationId = null, callbacks = {}) {
             break;
             
           case 'chunk':
-            // The content is directly in the data field now
-            fullContent += eventData;
-            callbacks.onChunk(eventData);
+            try {
+              // The content is now JSON-encoded to preserve newlines
+              const decodedContent = JSON.parse(eventData);
+              console.log('Decoded content:', decodedContent);
+              fullContent += decodedContent;
+              callbacks.onChunk(decodedContent);
+            } catch (e) {
+              console.error('Error parsing chunk:', e);
+              // Fallback to raw data if parsing fails
+              fullContent += eventData;
+              callbacks.onChunk(eventData);
+            }
             break;
             
           case 'end':
@@ -115,34 +124,21 @@ async function streamChat(message, conversationId = null, callbacks = {}) {
   }
 }
 
-// Example usage:
+// Example usage with content that has newlines
 /*
-streamChat("Tell me about quantum computing", null, {
-  onStart: () => {
-    // Show loading indicator
-    document.getElementById('loading').style.display = 'block';
-  },
+streamChat("Write a short poem about coding", null, {
   onChunk: (chunk) => {
-    // Append each chunk to the UI
+    // Use a pre element to preserve whitespace
     const outputElement = document.getElementById('output');
-    outputElement.textContent += chunk;
-  },
-  onConversationId: (id) => {
-    // Store the conversation ID for future messages
-    console.log('Got conversation ID:', id);
-    window.currentConversationId = id;
+    if (outputElement.textContent === '') {
+      outputElement.textContent = chunk;
+    } else {
+      outputElement.textContent += chunk;
+    }
   },
   onFinish: (fullContent) => {
-    // Hide loading indicator
-    document.getElementById('loading').style.display = 'none';
-    
-    // Maybe perform any post-processing
-    console.log('Total response length:', fullContent.length);
-  },
-  onError: (error) => {
-    // Display error in UI
-    document.getElementById('error').textContent = `Error: ${error.message}`;
-    document.getElementById('loading').style.display = 'none';
+    console.log('Complete poem with proper formatting:');
+    console.log(fullContent);
   }
 });
 */ 

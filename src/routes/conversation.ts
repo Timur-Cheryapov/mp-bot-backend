@@ -88,14 +88,16 @@ const createStreamProcessor = (conversationId: string) => {
             const dataMatch = event.match(/data: (.*)/);
             if (dataMatch && dataMatch[1]) {
               const eventData = JSON.parse(dataMatch[1]);
-              
               // Extract content from the chunk
               let content = '';
               if (eventData.data?.chunk?.kwargs?.content) {
                 content = eventData.data.chunk.kwargs.content;
                 
-                // Send just the content as an SSE event
-                this.push(Buffer.from(`event: chunk\ndata: ${content}\n\n`));
+                // JSON encode the content to preserve newlines and other special characters
+                const encodedContent = JSON.stringify(content);
+                
+                // Send the encoded content as an SSE event
+                this.push(Buffer.from(`event: chunk\ndata: ${encodedContent}\n\n`));
               }
             }
           } catch (err) {
