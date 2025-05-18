@@ -10,18 +10,18 @@ const router = express.Router();
 export const planDetailsMap: Record<string, { name: string; creditsPerDay: number; creditsPerMonth: number }> = {
   free: {
     name: "Free",
-    creditsPerDay: 10,
-    creditsPerMonth: 200
+    creditsPerDay: 0.50,
+    creditsPerMonth: 5.00
   },
   standard: {
     name: "Standard",
-    creditsPerDay: 50,
-    creditsPerMonth: 1000
+    creditsPerDay: 2.00,
+    creditsPerMonth: 20.00
   },
   premium: {
     name: "Premium",
-    creditsPerDay: 200,
-    creditsPerMonth: 5000
+    creditsPerDay: 10.00,
+    creditsPerMonth: 100.00
   }
 };
 
@@ -38,9 +38,9 @@ router.get('/', asyncHandler(async (req: Request, res: Response) => {
   if (!userPlan) {
     // Create a default plan if none exists
     const defaultPlan = await userPlansService.upsertUserPlan(userId, {
-      plan_name: 'free',
-      max_credits_per_day: 0.50,
-      max_credits_per_month: 5.00,
+      plan_name: planDetailsMap.free.name,
+      max_credits_per_day: planDetailsMap.free.creditsPerDay,
+      max_credits_per_month: planDetailsMap.free.creditsPerMonth,
       active: true
     });
     
