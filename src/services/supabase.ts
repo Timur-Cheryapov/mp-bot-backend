@@ -63,6 +63,14 @@ export type UserPlan = {
   active: boolean;
 };
 
+export interface UserApiKey {
+  user_id: string;
+  service: string;
+  api_key: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 // Environment variables
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;

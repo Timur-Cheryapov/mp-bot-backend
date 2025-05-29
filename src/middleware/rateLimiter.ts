@@ -50,4 +50,29 @@ export const authRateLimiter = rateLimit({
       retryAfter: Math.ceil(60), // Return minutes to wait
     });
   },
+});
+
+/**
+ * API Keys rate limiter
+ * Moderate limits for API key operations to prevent abuse
+ */
+export const apiKeysRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  limit: 20, // 20 requests per 15 minutes for API keys operations
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: {
+    status: 429,
+    message: 'Too many API key requests, please try again later.',
+  },
+  handler: (
+    req: Request,
+    res: Response
+  ) => {
+    res.status(429).json({
+      status: 'error',
+      message: 'Too many API key requests, please try again later.',
+      retryAfter: Math.ceil(15), // Return minutes to wait
+    });
+  },
 }); 

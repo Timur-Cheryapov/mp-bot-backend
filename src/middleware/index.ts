@@ -1,6 +1,6 @@
 import { securityMiddleware, customSecurityHeaders } from './security';
 import { corsMiddleware } from './cors';
-import { globalRateLimiter, authRateLimiter } from './rateLimiter';
+import { globalRateLimiter, authRateLimiter, apiKeysRateLimiter } from './rateLimiter';
 import { errorHandler, notFoundHandler, asyncHandler } from './errorHandler';
 import { validate } from './validator';
 import { authenticate, requireAdmin, handleAuthError, trackLoginAttempts } from './auth';
@@ -19,6 +19,7 @@ export {
   // Rate limiting middleware
   globalRateLimiter,
   authRateLimiter,
+  apiKeysRateLimiter,
   
   // Error handling middleware
   errorHandler,
@@ -44,4 +45,23 @@ export {
 };
 
 // Export auth middleware
-export * from './auth'; 
+export * from './auth';
+
+// Export grouped middleware for convenience
+export const rateLimiters = {
+  global: globalRateLimiter,
+  auth: authRateLimiter,
+  apiKeys: apiKeysRateLimiter,
+};
+
+export const security = {
+  csrf: csrfProtection,
+  cors: corsMiddleware,
+  headers: customSecurityHeaders,
+};
+
+export const auth = {
+  authenticate,
+  asyncHandler,
+  trackLoginAttempts,
+}; 

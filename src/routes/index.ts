@@ -5,6 +5,7 @@ import promptDemoRoutes from './promptDemo';
 import metricsRoutes from './metrics';
 import conversationsRoutes from './conversation';
 import plansRoutes from './plans';
+import apiKeysRoutes from './apiKeys.routes';
 
 const router = Router();
 
@@ -17,5 +18,6 @@ router.use('/prompt-demo', promptDemoRoutes);
 router.use('/metrics', metricsRoutes);
 router.use('/conversation', conversationsRoutes);
 router.use('/plans', plansRoutes);
+router.use('/api-keys', apiKeysRoutes);
 
 export default router; 
