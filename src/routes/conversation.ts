@@ -6,8 +6,6 @@ import * as conversationService from '../services/conversationService';
 import { Conversation } from '../services/supabase';
 import { convertConversationToUi, convertMessageToUi } from '../utils/fromDbToUiConverters';
 import { Readable } from 'stream';
-import { Transform } from 'stream';
-import { Buffer } from 'buffer';
 
 // Extend the Express Request type to include the conversation property
 declare global {
@@ -17,152 +15,6 @@ declare global {
     }
   }
 }
-
-// Helper function to extract token usage from stream chunks
-// and simplify the stream to just send content chunks
-const createStreamProcessor = (conversationId: string) => {
-  let buffer = '';
-  let toolExecutionSent = false;
-  
-  return new Transform({
-    objectMode: true,
-    transform(chunk: Buffer, encoding, callback) {
-      // Convert the chunk to string and append to buffer
-      const chunkStr = chunk.toString();
-      buffer += chunkStr;
-      
-      // Process any complete events in the buffer
-      let processedBuffer = '';
-      const events = buffer.split('\n\n');
-      
-      // Keep the last item if it doesn't end with \n\n (incomplete)
-      if (!buffer.endsWith('\n\n') && events.length > 0) {
-        processedBuffer = events.pop() || '';
-      }
-      
-      for (const event of events) {
-        if (!event.trim()) continue;
-        logger.info(`Processing event: ${event}`);
-        
-        // Look for on_chat_model_end event to extract token usage
-        if (event.includes('event: data') && event.includes('"event":"on_chat_model_end"')) {
-          try {
-            // Parse the JSON data in the event
-            const dataMatch = event.match(/data: (.*)/);
-            if (dataMatch && dataMatch[1]) {
-              const eventData = JSON.parse(dataMatch[1]);
-              
-              // Check if this is a tool call vs final response
-              const hasToolCalls = eventData.data?.output?.kwargs?.tool_calls?.length > 0;
-              const hasContent = eventData.data?.output?.kwargs?.content && eventData.data.output.kwargs.content.trim().length > 0;
-              
-              if (hasToolCalls && !hasContent && !toolExecutionSent) {
-                // This is a tool call event, not the final response
-                logger.info(`Tool call detected for conversation ${conversationId}:`, {
-                  toolCalls: eventData.data.output.kwargs.tool_calls?.map((tc: any) => tc.name) || []
-                });
-                
-                // Send tool execution notification to client
-                this.push(Buffer.from(`event: tool_execution\ndata: ${JSON.stringify({
-                  message: "Fetching your Wildberries product data...",
-                  toolCalls: eventData.data.output.kwargs.tool_calls?.map((tc: any) => tc.name) || []
-                })}\n\n`));
-                
-                toolExecutionSent = true;
-                
-                // Don't end the stream yet, continue to wait for final response
-                continue;
-              }
-              
-              // This is the final response (has content or no tool calls)
-              // Extract token usage from the event data
-              let tokenUsage = null;
-              if (eventData.data?.output?.kwargs?.response_metadata?.usage) {
-                tokenUsage = eventData.data.output.kwargs.response_metadata.usage;
-              } else if (eventData.data?.output?.kwargs?.usage_metadata) {
-                tokenUsage = {
-                  prompt_tokens: eventData.data.output.kwargs.usage_metadata.input_tokens,
-                  completion_tokens: eventData.data.output.kwargs.usage_metadata.output_tokens,
-                  total_tokens: eventData.data.output.kwargs.usage_metadata.total_tokens
-                };
-              }
-              
-              if (tokenUsage) {
-                logger.info(`Token usage for conversation ${conversationId}: ${JSON.stringify(tokenUsage)}`);
-                
-                // Store token usage in database (async, don't await)
-                conversationService.storeTokenUsage(conversationId, tokenUsage)
-                  .catch(err => logger.error(`Error storing token usage: ${err}`));
-                
-                // Send an end event after processing the final chunk
-                this.push(Buffer.from(`event: end\ndata: {}\n\n`));
-              }
-            }
-          } catch (err) {
-            logger.error(`Error parsing stream event: ${err}`);
-          }
-          
-          // Don't pass through the token usage event to the client
-          continue;
-        }
-        
-        // For content chunks, extract and simplify
-        if (event.includes('event: data') && event.includes('"event":"on_chat_model_stream"')) {
-          try {
-            // Parse the JSON data in the event
-            const dataMatch = event.match(/data: (.*)/);
-            if (dataMatch && dataMatch[1]) {
-              const eventData = JSON.parse(dataMatch[1]);
-              // Extract content from the chunk
-              let content = '';
-              if (eventData.data?.chunk?.kwargs?.content) {
-                content = eventData.data.chunk.kwargs.content;
-                
-                // JSON encode the content to preserve newlines and other special characters
-                const encodedContent = JSON.stringify(content);
-                
-                // Send the encoded content as an SSE event
-                this.push(Buffer.from(`event: chunk\ndata: ${encodedContent}\n\n`));
-              }
-            }
-          } catch (err) {
-            logger.error(`Error parsing content chunk: ${err}`);
-          }
-          
-          // Don't pass through the original event
-          continue;
-        }
-        
-        // Special handling for end event
-        if (event.includes('event: end')) {
-          this.push(Buffer.from(`${event}\n\n`));
-          continue;
-        }
-        
-        // Pass through any other events unchanged (like conversationId)
-        if (!event.includes('"event":"on_chunk"') && !event.includes('"event":"on_chat_model_end"')) {
-          this.push(Buffer.from(`${event}\n\n`));
-        }
-      }
-      
-      // Update buffer with any incomplete data
-      buffer = processedBuffer;
-      callback();
-    },
-    
-    flush(callback) {
-      // Push any remaining data
-      if (buffer) {
-        this.push(Buffer.from(buffer));
-      }
-      // Always end with an end event if not already sent
-      if (!buffer.includes('event: end')) {
-        this.push(Buffer.from(`event: end\ndata: {}\n\n`));
-      }
-      callback();
-    }
-  });
-};
 
 const router = express.Router();
 
@@ -283,12 +135,8 @@ router.post('/new', asyncHandler(async (req: Request, res: Response) => {
             }
           });
           
-          // Create stream processor to extract token usage and simplify content
-          const streamProcessor = createStreamProcessor(conversation.id);
-          
           // Pipe the stream through processor to response
           readableStream
-            .pipe(streamProcessor)
             .pipe(res);
           return;
         }
@@ -483,12 +331,8 @@ router.post('/:conversationId', asyncHandler(async (req: Request, res: Response)
             }
           });
           
-          // Create stream processor to extract token usage and simplify content
-          const streamProcessor = createStreamProcessor(conversationId);
-          
           // Pipe the stream through processor to response
           readableStream
-            .pipe(streamProcessor)
             .pipe(res);
           return;
         }

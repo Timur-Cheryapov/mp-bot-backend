@@ -370,62 +370,101 @@ Focus on being helpful for marketplace sellers and provide actionable business i
   }
 
   /**
-   * Handle streaming with tool calls
+   * Handle streaming with tool calls - implements chain of thoughts approach
    */
   private async handleStreamingWithToolCalls(
     chatModel: any,
     langchainMessages: any[],
     userId?: string
   ): Promise<Response> {
-    // First invoke to check for tool calls
-    const initialResponse = await chatModel.invoke(langchainMessages);
-
-    // Check if the model wants to call tools
-    if (initialResponse.tool_calls && initialResponse.tool_calls.length > 0) {
-      logger.info(`Tool calls detected for streaming: ${initialResponse.tool_calls.map((tc: any) => tc.name).join(', ')}`);
-      
-      // Execute tools
-      const toolResults = await this.executeTools(initialResponse.tool_calls, userId);
-
-      // Create new message array with tool results
-      const messagesWithTools = [
-        ...langchainMessages,
-        initialResponse,
-        ...toolResults
-      ];
-
-      // Stream the final response with tool results
-      const eventStream = await chatModel.streamEvents(
-        messagesWithTools,
-        { 
-          version: 'v2',
-          encoding: 'text/event-stream'
-        },
-        { includeTypes: ["chat_model"]}
-      );
-
-      return new Response(eventStream, {
-        headers: {
-          'Content-Type': 'text/event-stream'
+    const encoder = new TextEncoder();
+    const self = this; // Capture the class context
+    
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          // Step 1: Stream the initial response (may contain tool calls)
+          logger.info('Starting chain of thoughts streaming...');
+          
+          const streamResponse = await chatModel.stream(langchainMessages);
+          let initialResponse: any = null;
+          let accumulatedContent = '';
+          
+          // Stream the initial AI response
+          for await (const chunk of streamResponse) {
+            if (chunk.content) {
+              accumulatedContent += chunk.content;
+              // Send content chunk to client
+              const chunkData = JSON.stringify(chunk.content);
+              controller.enqueue(encoder.encode(`event: chunk\ndata: ${chunkData}\n\n`));
+            }
+            
+            // Accumulate the full response
+            if (!initialResponse) {
+              initialResponse = chunk;
+            } else {
+              initialResponse = initialResponse.concat(chunk);
+            }
+          }
+          
+          // Step 2: Check if there are tool calls to execute
+          if (initialResponse?.tool_calls && initialResponse.tool_calls.length > 0) {
+            logger.info(`Tool calls detected in streaming: ${initialResponse.tool_calls.map((tc: any) => tc.name).join(', ')}`);
+            
+            // Send tool execution notification
+            const toolNotification = {
+              message: "Let me fetch your Wildberries product data...",
+              toolCalls: initialResponse.tool_calls.map((tc: any) => tc.name)
+            };
+            controller.enqueue(encoder.encode(`event: tool_execution\ndata: ${JSON.stringify(toolNotification)}\n\n`));
+            
+            // Step 3: Execute tools
+            const toolResults = await self.executeTools(initialResponse.tool_calls, userId);
+            
+            // Step 4: Create messages with tool results and get final response
+            const messagesWithTools = [
+              ...langchainMessages,
+              initialResponse,
+              ...toolResults
+            ];
+            
+            // Send separator to indicate we're moving to final response
+            controller.enqueue(encoder.encode(`event: tool_complete\ndata: ${JSON.stringify({message: "Processing results..."})}\n\n`));
+            
+            // Step 5: Stream the final response with tool results
+            const finalStreamResponse = await chatModel.stream(messagesWithTools);
+            
+            for await (const chunk of finalStreamResponse) {
+              if (chunk.content) {
+                // Send final response content
+                const chunkData = JSON.stringify(chunk.content);
+                controller.enqueue(encoder.encode(`event: chunk\ndata: ${chunkData}\n\n`));
+              }
+            }
+          }
+          
+          // Step 6: Send end event
+          controller.enqueue(encoder.encode(`event: end\ndata: {}\n\n`));
+          controller.close();
+          
+        } catch (error) {
+          logger.error('Error in chain of thoughts streaming:', error);
+          const errorData = JSON.stringify({
+            error: error instanceof Error ? error.message : 'Unknown error occurred'
+          });
+          controller.enqueue(encoder.encode(`event: error\ndata: ${errorData}\n\n`));
+          controller.close();
         }
-      });
-    } else {
-      // No tool calls, stream normal response
-      const eventStream = await chatModel.streamEvents(
-        langchainMessages,
-        { 
-          version: 'v2',
-          encoding: 'text/event-stream'
-        },
-        { includeTypes: ["chat_model"]}
-      );
+      }
+    });
 
-      return new Response(eventStream, {
-        headers: {
-          'Content-Type': 'text/event-stream'
-        }
-      });
-    }
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive'
+      }
+    });
   }
 
   /**
