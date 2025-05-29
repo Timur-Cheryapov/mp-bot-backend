@@ -22,6 +22,7 @@ declare global {
 // and simplify the stream to just send content chunks
 const createStreamProcessor = (conversationId: string) => {
   let buffer = '';
+  let toolExecutionSent = false;
   
   return new Transform({
     objectMode: true,
@@ -41,6 +42,7 @@ const createStreamProcessor = (conversationId: string) => {
       
       for (const event of events) {
         if (!event.trim()) continue;
+        logger.info(`Processing event: ${event}`);
         
         // Look for on_chat_model_end event to extract token usage
         if (event.includes('event: data') && event.includes('"event":"on_chat_model_end"')) {
@@ -50,6 +52,29 @@ const createStreamProcessor = (conversationId: string) => {
             if (dataMatch && dataMatch[1]) {
               const eventData = JSON.parse(dataMatch[1]);
               
+              // Check if this is a tool call vs final response
+              const hasToolCalls = eventData.data?.output?.kwargs?.tool_calls?.length > 0;
+              const hasContent = eventData.data?.output?.kwargs?.content && eventData.data.output.kwargs.content.trim().length > 0;
+              
+              if (hasToolCalls && !hasContent && !toolExecutionSent) {
+                // This is a tool call event, not the final response
+                logger.info(`Tool call detected for conversation ${conversationId}:`, {
+                  toolCalls: eventData.data.output.kwargs.tool_calls?.map((tc: any) => tc.name) || []
+                });
+                
+                // Send tool execution notification to client
+                this.push(Buffer.from(`event: tool_execution\ndata: ${JSON.stringify({
+                  message: "Fetching your Wildberries product data...",
+                  toolCalls: eventData.data.output.kwargs.tool_calls?.map((tc: any) => tc.name) || []
+                })}\n\n`));
+                
+                toolExecutionSent = true;
+                
+                // Don't end the stream yet, continue to wait for final response
+                continue;
+              }
+              
+              // This is the final response (has content or no tool calls)
               // Extract token usage from the event data
               let tokenUsage = null;
               if (eventData.data?.output?.kwargs?.response_metadata?.usage) {

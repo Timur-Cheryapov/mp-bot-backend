@@ -1,12 +1,12 @@
 import { ChatOpenAI } from '@langchain/openai';
 import { OpenAIEmbeddings } from '@langchain/openai';
-import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
 import logger from '../utils/logger';
 import { estimateTokenCount, formatLangchainMessagesToBasic } from '../utils/langchainUtils';
 import { upsertDailyUsage } from './dailyUsage';
 import { DailyUsage } from './supabase';
 import { checkUserDailyUsage } from './userPlans';
-import { StringOutputParser } from '@langchain/core/output_parsers';
+import { createWildberriesSellerProductsTool } from './wildberriesTools';
 
 // Environment variables
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -29,6 +29,8 @@ export type ChatModelParams = {
   temperature?: number;
   maxTokens?: number;
   modelName?: string;
+  includeWildberriesTools?: boolean;
+  userId?: string; // Required when includeWildberriesTools is true
 };
 
 export type EmbeddingModelParams = {
@@ -90,7 +92,7 @@ class LangChainService {
   /**
    * Create a chat model instance with the specified parameters
    */
-  public createChatModel(params: ChatModelParams = {}): ChatOpenAI {
+  public async createChatModel(params: ChatModelParams = {}): Promise<ChatOpenAI | any> {
     try {
       if (!this.initialized) {
         throw new Error(ERROR_INITIALIZATION);
@@ -99,8 +101,15 @@ class LangChainService {
       const {
         temperature = 0.7,
         maxTokens = 2048,
-        modelName = MODEL_CONFIGS.GPT4O_MINI
+        modelName = MODEL_CONFIGS.GPT4O_MINI,
+        includeWildberriesTools = false,
+        userId
       } = params;
+
+      // Validate userId when Wildberries tools are requested
+      if (includeWildberriesTools && !userId) {
+        throw new Error('userId is required when includeWildberriesTools is true');
+      }
       
       const modelConfig: any = {
         temperature,
@@ -110,7 +119,23 @@ class LangChainService {
         timeout: 30000, // 30 seconds timeout
       };
 
-      return new ChatOpenAI(modelConfig);
+      const chatModel = new ChatOpenAI(modelConfig);
+
+      // Add Wildberries tools if requested
+      if (includeWildberriesTools && userId) {
+        try {
+          const wildberriesSellerTool = createWildberriesSellerProductsTool(userId);
+          return chatModel.bindTools([wildberriesSellerTool]);
+        } catch (toolError) {
+          logger.warn('Failed to create Wildberries tools, returning model without tools', {
+            userId,
+            error: toolError instanceof Error ? toolError.message : String(toolError)
+          });
+          return chatModel;
+        }
+      }
+
+      return chatModel;
     } catch (error) {
       logger.error(`${ERROR_MODEL_CREATION}: ${error instanceof Error ? error.message : String(error)}`);
       throw new Error(`${ERROR_MODEL_CREATION}: ${error instanceof Error ? error.message : String(error)}`);
@@ -144,6 +169,33 @@ class LangChainService {
       throw new Error(`${ERROR_MODEL_CREATION}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
+
+  /**
+   * Generate system prompt with Wildberries tools guidance
+   */
+  private generateSystemPromptWithWildberriesTools(basePrompt: string): string {
+    return `${basePrompt}
+
+You have access to Wildberries marketplace tools. When users ask about their marketplace business:
+
+1. **Use tools proactively** when users mention products, inventory, or marketplace data
+2. **Explain what you're doing** - tell users when you're fetching their data
+3. **Present data clearly** - format product information in readable tables or lists
+4. **Provide insights** - don't just show raw data, analyze trends and suggest improvements
+5. **Handle errors gracefully** - if tool calls fail:
+   - Check if the tool response contains a "userMessage" field and use that for user communication
+   - If no userMessage, explain the technical error in user-friendly terms
+   - Always offer next steps or solutions
+   - Never show raw error objects to users
+
+6. **User-friendly error handling**:
+   - API key missing: Guide them to add their Wildberries API key
+   - Permission errors: Explain they need Content category access
+   - Rate limits: Suggest waiting and trying again
+   - Network errors: Suggest trying again later
+
+Focus on being helpful for marketplace sellers and provide actionable business insights even when data isn't available.`;
+  }
   
   /**
    * Generate a chat completion with basic message types
@@ -158,7 +210,8 @@ class LangChainService {
     userMessage: string,
     modelName: string = MODEL_CONFIGS.GPT4O_MINI,
     userId?: string,
-    stream?: boolean
+    stream?: boolean,
+    includeWildberriesTools?: boolean
   ): Promise<string> {
     try {
       // Check if user has reached their token limit
@@ -169,9 +222,18 @@ class LangChainService {
         }
       }
 
-      const chatModel = this.createChatModel({ modelName });
+      const finalSystemPrompt = includeWildberriesTools 
+        ? this.generateSystemPromptWithWildberriesTools(systemPrompt)
+        : systemPrompt;
+
+      const chatModel = await this.createChatModel({ 
+        modelName, 
+        includeWildberriesTools,
+        userId 
+      });
+
       const messages = [
-        new SystemMessage(systemPrompt),
+        new SystemMessage(finalSystemPrompt),
         new HumanMessage(userMessage)
       ];
 
@@ -199,7 +261,7 @@ class LangChainService {
         responseAI = response as AIMessage;
       }
 
-      await this.trackTokenUsage(responseAI, systemPrompt, formatLangchainMessagesToBasic(messages), modelName, userId);
+      await this.trackTokenUsage(responseAI, finalSystemPrompt, formatLangchainMessagesToBasic(messages), modelName, userId);
       return outputText;
     } catch (error) {
       logger.error(`Error generating chat response: ${error instanceof Error ? error.message : String(error)}`);
@@ -220,7 +282,8 @@ class LangChainService {
     messages: Array<{role: string, content: string}>,
     modelName: string = MODEL_CONFIGS.GPT4O_MINI,
     userId?: string,
-    stream?: boolean
+    stream?: boolean,
+    includeWildberriesTools: boolean = true
   ): Promise<string | Response> {
     try {
       // Check if user has reached their token limit
@@ -231,9 +294,18 @@ class LangChainService {
         }
       }
 
-      const chatModel = this.createChatModel({ modelName });
+      const finalSystemPrompt = includeWildberriesTools 
+        ? this.generateSystemPromptWithWildberriesTools(systemPrompt)
+        : systemPrompt;
+
+      const chatModel = await this.createChatModel({ 
+        modelName,
+        includeWildberriesTools,
+        userId
+      });
+
       const langchainMessages = [
-        new SystemMessage(systemPrompt),
+        new SystemMessage(finalSystemPrompt),
         ...messages.map(msg => {
           if (msg.role === 'user') return new HumanMessage(msg.content);
           if (msg.role === 'assistant') return new AIMessage(msg.content);
@@ -242,31 +314,175 @@ class LangChainService {
       ];
 
       if (stream) {
-        const eventStream = await chatModel.streamEvents(
-          langchainMessages,
-          { 
-            version: 'v2',
-            encoding: 'text/event-stream'
-          },
-          { includeTypes: ["chat_model"]}
-        );
-
-        return new Response(eventStream, {
-          headers: {
-            'Content-Type': 'text/event-stream'
-          }
-        });
+        // For streaming, we need to handle tool calls manually
+        return this.handleStreamingWithToolCalls(chatModel, langchainMessages, userId);
       } else {
-        const response = await chatModel.invoke(langchainMessages);
-        const outputText = response.content.toString();
-        const responseAI = response as AIMessage;
-        await this.trackTokenUsage(responseAI, systemPrompt, messages, modelName, userId);
-        return outputText;
+        // For non-streaming, handle tool calls and return final response
+        return this.handleToolCallsAndGetResponse(chatModel, langchainMessages, finalSystemPrompt, messages, modelName, userId);
       }
     } catch (error) {
       logger.error(`Error generating conversation response: ${error instanceof Error ? error.message : String(error)}`);
       throw new Error(`Failed to generate response: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  /**
+   * Handle tool calls and get final response for non-streaming mode
+   */
+  private async handleToolCallsAndGetResponse(
+    chatModel: any,
+    langchainMessages: any[],
+    systemPrompt: string,
+    originalMessages: Array<{role: string, content: string}>,
+    modelName: string,
+    userId?: string
+  ): Promise<string> {
+    // First invoke to check for tool calls
+    const initialResponse = await chatModel.invoke(langchainMessages);
+
+    // Check if the model wants to call tools
+    if (initialResponse.tool_calls && initialResponse.tool_calls.length > 0) {
+      logger.info(`Tool calls detected: ${initialResponse.tool_calls.map((tc: any) => tc.name).join(', ')}`);
+      
+      // Execute tools
+      const toolResults = await this.executeTools(initialResponse.tool_calls, userId);
+
+      // Create new message array with tool results
+      const messagesWithTools = [
+        ...langchainMessages,
+        initialResponse,
+        ...toolResults
+      ];
+
+      // Get final response with tool results
+      const finalResponse = await chatModel.invoke(messagesWithTools);
+      const outputText = finalResponse.content.toString();
+      
+      // Track token usage for the final response
+      await this.trackTokenUsage(finalResponse, systemPrompt, originalMessages, modelName, userId);
+      return outputText;
+    } else {
+      // No tool calls, return response directly
+      const outputText = initialResponse.content.toString();
+      await this.trackTokenUsage(initialResponse, systemPrompt, originalMessages, modelName, userId);
+      return outputText;
+    }
+  }
+
+  /**
+   * Handle streaming with tool calls
+   */
+  private async handleStreamingWithToolCalls(
+    chatModel: any,
+    langchainMessages: any[],
+    userId?: string
+  ): Promise<Response> {
+    // First invoke to check for tool calls
+    const initialResponse = await chatModel.invoke(langchainMessages);
+
+    // Check if the model wants to call tools
+    if (initialResponse.tool_calls && initialResponse.tool_calls.length > 0) {
+      logger.info(`Tool calls detected for streaming: ${initialResponse.tool_calls.map((tc: any) => tc.name).join(', ')}`);
+      
+      // Execute tools
+      const toolResults = await this.executeTools(initialResponse.tool_calls, userId);
+
+      // Create new message array with tool results
+      const messagesWithTools = [
+        ...langchainMessages,
+        initialResponse,
+        ...toolResults
+      ];
+
+      // Stream the final response with tool results
+      const eventStream = await chatModel.streamEvents(
+        messagesWithTools,
+        { 
+          version: 'v2',
+          encoding: 'text/event-stream'
+        },
+        { includeTypes: ["chat_model"]}
+      );
+
+      return new Response(eventStream, {
+        headers: {
+          'Content-Type': 'text/event-stream'
+        }
+      });
+    } else {
+      // No tool calls, stream normal response
+      const eventStream = await chatModel.streamEvents(
+        langchainMessages,
+        { 
+          version: 'v2',
+          encoding: 'text/event-stream'
+        },
+        { includeTypes: ["chat_model"]}
+      );
+
+      return new Response(eventStream, {
+        headers: {
+          'Content-Type': 'text/event-stream'
+        }
+      });
+    }
+  }
+
+  /**
+   * Execute tool calls and return ToolMessage objects
+   */
+  private async executeTools(toolCalls: any[], userId?: string): Promise<ToolMessage[]> {
+    const toolResults: ToolMessage[] = [];
+
+    // Create tools map
+    const toolsByName: Record<string, any> = {};
+    
+    if (userId) {
+      try {
+        const wildberriesSellerTool = createWildberriesSellerProductsTool(userId);
+        toolsByName['wildberries_seller_products'] = wildberriesSellerTool;
+      } catch (error) {
+        logger.warn('Failed to create Wildberries tool for execution', { userId, error });
+      }
+    }
+
+    // Execute each tool call
+    for (const toolCall of toolCalls) {
+      try {
+        const selectedTool = toolsByName[toolCall.name];
+        if (selectedTool) {
+          logger.info(`Executing tool: ${toolCall.name}`, { args: toolCall.args });
+          
+          // Use LangChain's built-in tool invocation which returns a ToolMessage
+          const toolMessage = await selectedTool.invoke(toolCall);
+          toolResults.push(toolMessage);
+        } else {
+          logger.error(`Tool not found: ${toolCall.name}`);
+          // Create an error ToolMessage for unknown tools
+          const errorMessage = new ToolMessage({
+            content: JSON.stringify({
+              error: `Tool '${toolCall.name}' not found`,
+              userMessage: "I encountered an error while trying to use the requested tool. Please try again later."
+            }),
+            tool_call_id: toolCall.id
+          });
+          toolResults.push(errorMessage);
+        }
+      } catch (error) {
+        logger.error(`Tool execution failed for ${toolCall.name}:`, error);
+        // Create an error ToolMessage for failed executions
+        const errorMessage = new ToolMessage({
+          content: JSON.stringify({
+            error: "Tool execution failed",
+            userMessage: "I encountered an error while trying to fetch your data. Please try again later."
+          }),
+          tool_call_id: toolCall.id
+        });
+        toolResults.push(errorMessage);
+      }
+    }
+
+    return toolResults;
   }
 
   /**
