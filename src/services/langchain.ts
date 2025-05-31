@@ -179,7 +179,7 @@ class LangChainService {
 You have access to Wildberries marketplace tools. When users ask about their marketplace business:
 
 1. **Use tools proactively** when users mention products, inventory, or marketplace data
-2. **Explain what you're doing** - tell users when you're fetching their data
+2. **Explain what you're doing** - tell users what tools you're going to call
 3. **Present data clearly** - format product information in readable tables or lists
 4. **Provide insights** - don't just show raw data, analyze trends and suggest improvements
 5. **Handle errors gracefully** - if tool calls fail:
@@ -275,12 +275,14 @@ Focus on being helpful for marketplace sellers and provide actionable business i
    * @param messages Array of conversation messages (role and content)
    * @param model Optional model name
    * @param userId The user ID for usage tracking
+   * @param conversationId The conversation ID for saving messages during streaming
    * @returns The AI's response
    */
   public async generateConversationResponse(
     systemPrompt: string,
-    messages: Array<{role: string, content: string}>,
+    messages: Array<{role: string, content: string, tool_call_id?: string, tool_name?: string}>, // TODO: Add tool calls to messages
     modelName: string = MODEL_CONFIGS.GPT4O_MINI,
+    conversationId: string,
     userId?: string,
     stream?: boolean,
     includeWildberriesTools: boolean = true
@@ -308,14 +310,23 @@ Focus on being helpful for marketplace sellers and provide actionable business i
         new SystemMessage(finalSystemPrompt),
         ...messages.map(msg => {
           if (msg.role === 'user') return new HumanMessage(msg.content);
-          if (msg.role === 'assistant') return new AIMessage(msg.content);
+          if (msg.role === 'assistant') return new AIMessage(msg.content); // TODO: Add tool calls to assistant messages
+          if (msg.role === 'tool') { return new ToolMessage(msg.content, msg.tool_call_id || 'unknown', msg.tool_name || 'unknown'); }
           return new SystemMessage(msg.content);
         })
       ];
 
       if (stream) {
         // For streaming, we need to handle tool calls manually
-        return this.handleStreamingWithToolCalls(chatModel, langchainMessages, userId);
+        return this.handleStreamingWithToolCalls(
+          chatModel, 
+          langchainMessages, 
+          conversationId, 
+          finalSystemPrompt, 
+          messages, 
+          modelName, 
+          userId
+        );
       } else {
         // For non-streaming, handle tool calls and return final response
         return this.handleToolCallsAndGetResponse(chatModel, langchainMessages, finalSystemPrompt, messages, modelName, userId);
@@ -340,6 +351,9 @@ Focus on being helpful for marketplace sellers and provide actionable business i
     // First invoke to check for tool calls
     const initialResponse = await chatModel.invoke(langchainMessages);
 
+    // Track token usage for the initial response
+    await this.trackTokenUsage(initialResponse, systemPrompt, originalMessages, modelName, userId);
+
     // Check if the model wants to call tools
     if (initialResponse.tool_calls && initialResponse.tool_calls.length > 0) {
       logger.info(`Tool calls detected: ${initialResponse.tool_calls.map((tc: any) => tc.name).join(', ')}`);
@@ -357,9 +371,15 @@ Focus on being helpful for marketplace sellers and provide actionable business i
       // Get final response with tool results
       const finalResponse = await chatModel.invoke(messagesWithTools);
       const outputText = finalResponse.content.toString();
+
+      const finalMessages = [
+        ...originalMessages,
+        { role: 'assistant', content: outputText },
+        ...toolResults.map(tr => ({ role: 'tool', content: tr.content.toString() }))
+      ];
       
       // Track token usage for the final response
-      await this.trackTokenUsage(finalResponse, systemPrompt, originalMessages, modelName, userId);
+      await this.trackTokenUsage(finalResponse, systemPrompt, finalMessages, modelName, userId);
       return outputText;
     } else {
       // No tool calls, return response directly
@@ -375,6 +395,10 @@ Focus on being helpful for marketplace sellers and provide actionable business i
   private async handleStreamingWithToolCalls(
     chatModel: any,
     langchainMessages: any[],
+    conversationId: string,
+    finalSystemPrompt: string,
+    messages: Array<{role: string, content: string}>,
+    modelName: string,
     userId?: string
   ): Promise<Response> {
     const encoder = new TextEncoder();
@@ -385,15 +409,16 @@ Focus on being helpful for marketplace sellers and provide actionable business i
         try {
           // Step 1: Stream the initial response (may contain tool calls)
           logger.info('Starting chain of thoughts streaming...');
+
+          console.log('Langchain messages:', langchainMessages);
           
           const streamResponse = await chatModel.stream(langchainMessages);
           let initialResponse: any = null;
-          let accumulatedContent = '';
           
           // Stream the initial AI response
           for await (const chunk of streamResponse) {
+            //console.log(chunk);
             if (chunk.content) {
-              accumulatedContent += chunk.content;
               // Send content chunk to client
               const chunkData = JSON.stringify(chunk.content);
               controller.enqueue(encoder.encode(`event: chunk\ndata: ${chunkData}\n\n`));
@@ -407,7 +432,25 @@ Focus on being helpful for marketplace sellers and provide actionable business i
             }
           }
           
-          // Step 2: Check if there are tool calls to execute
+          // Step 2: Save the initial AI response and track token usage
+          if (initialResponse) {
+            try {
+              await self.saveMessage(conversationId, initialResponse.content.toString(), 'assistant', {
+                tool_call_id: initialResponse.tool_calls?.map((tc: any) => tc.id),
+                tool_name: initialResponse.tool_calls?.map((tc: any) => tc.name)
+              });
+              logger.info('Saved initial AI response to database');
+              
+              // Track token usage for initial response
+              if (initialResponse && userId) {
+                await self.trackTokenUsage(initialResponse, finalSystemPrompt, messages, modelName, userId);
+              }
+            } catch (saveError) {
+              logger.error('Failed to save initial AI response:', saveError);
+            }
+          }
+          
+          // Step 3: Check if there are tool calls to execute
           if (initialResponse?.tool_calls && initialResponse.tool_calls.length > 0) {
             logger.info(`Tool calls detected in streaming: ${initialResponse.tool_calls.map((tc: any) => tc.name).join(', ')}`);
             
@@ -418,10 +461,29 @@ Focus on being helpful for marketplace sellers and provide actionable business i
             };
             controller.enqueue(encoder.encode(`event: tool_execution\ndata: ${JSON.stringify(toolNotification)}\n\n`));
             
-            // Step 3: Execute tools
+            // Step 4: Execute tools and save tool messages
             const toolResults = await self.executeTools(initialResponse.tool_calls, userId);
             
-            // Step 4: Create messages with tool results and get final response
+            // Save tool messages to database
+            for (const toolResult of toolResults) {
+              try {
+                await self.saveMessage(
+                  conversationId,
+                  ((toolResult.content as any).error || (toolResult.content as any)).toString(),
+                  'tool',
+                  {
+                    tool_call_id: toolResult.tool_call_id,
+                    tool_name: initialResponse.tool_calls.find((tc: any) => tc.id === toolResult.tool_call_id)?.name
+                  },
+                  toolResult.status === 'error' ? 'error' : 'success'
+                );
+                logger.info(`Saved tool message to database: ${toolResult.tool_call_id}`);
+              } catch (saveError) {
+                logger.error('Failed to save tool message:', saveError);
+              }
+            }
+            
+            // Step 5: Create messages with tool results and get final response
             const messagesWithTools = [
               ...langchainMessages,
               initialResponse,
@@ -431,8 +493,9 @@ Focus on being helpful for marketplace sellers and provide actionable business i
             // Send separator to indicate we're moving to final response
             controller.enqueue(encoder.encode(`event: tool_complete\ndata: ${JSON.stringify({message: "Processing results..."})}\n\n`));
             
-            // Step 5: Stream the final response with tool results
+            // Step 6: Stream the final response with tool results
             const finalStreamResponse = await chatModel.stream(messagesWithTools);
+            let finalResponse: any = null;
             
             for await (const chunk of finalStreamResponse) {
               if (chunk.content) {
@@ -440,10 +503,38 @@ Focus on being helpful for marketplace sellers and provide actionable business i
                 const chunkData = JSON.stringify(chunk.content);
                 controller.enqueue(encoder.encode(`event: chunk\ndata: ${chunkData}\n\n`));
               }
+              
+              // Accumulate the final response for token tracking
+              if (!finalResponse) {
+                finalResponse = chunk;
+              } else {
+                finalResponse = finalResponse.concat(chunk);
+              }
+            }
+            
+            // Step 7: Save the final AI response and track token usage
+            if (finalResponse.content.trim()) {
+              try {
+                await self.saveMessage(conversationId, finalResponse.content.toString(), 'assistant');
+                logger.info('Saved final AI response to database');
+                
+                // Track token usage for final response
+                if (finalResponse && userId) {
+                  // Create updated message history including tool results for accurate token calculation
+                  const updatedMessages = [
+                    ...messages,
+                    { role: 'assistant', content: finalResponse.content.toString() },
+                    ...toolResults.map(tr => ({ role: 'tool', content: tr.content.toString() }))
+                  ];
+                  await self.trackTokenUsage(finalResponse, finalSystemPrompt, updatedMessages, modelName, userId);
+                }
+              } catch (saveError) {
+                logger.error('Failed to save final AI response:', saveError);
+              }
             }
           }
           
-          // Step 6: Send end event
+          // Step 8: Send end event
           controller.enqueue(encoder.encode(`event: end\ndata: {}\n\n`));
           controller.close();
           
@@ -499,11 +590,9 @@ Focus on being helpful for marketplace sellers and provide actionable business i
           logger.error(`Tool not found: ${toolCall.name}`);
           // Create an error ToolMessage for unknown tools
           const errorMessage = new ToolMessage({
-            content: JSON.stringify({
-              error: `Tool '${toolCall.name}' not found`,
-              userMessage: "I encountered an error while trying to use the requested tool. Please try again later."
-            }),
-            tool_call_id: toolCall.id
+            content: `Tool '${toolCall.name}' not found`,
+            tool_call_id: toolCall.id,
+            status: 'error'
           });
           toolResults.push(errorMessage);
         }
@@ -511,11 +600,9 @@ Focus on being helpful for marketplace sellers and provide actionable business i
         logger.error(`Tool execution failed for ${toolCall.name}:`, error);
         // Create an error ToolMessage for failed executions
         const errorMessage = new ToolMessage({
-          content: JSON.stringify({
-            error: "Tool execution failed",
-            userMessage: "I encountered an error while trying to fetch your data. Please try again later."
-          }),
-          tool_call_id: toolCall.id
+          content: "Tool execution failed",
+          tool_call_id: toolCall.id,
+          status: 'error'
         });
         toolResults.push(errorMessage);
       }
@@ -601,7 +688,13 @@ Focus on being helpful for marketplace sellers and provide actionable business i
       usage.map(u => upsertDailyUsage(u.user_id, today, u.model, 0, 0, 0))
     );
   }
+
+  private async saveMessage(conversationId: string, content: string, role: 'user' | 'assistant' | 'tool', metadata?: Record<string, any>, status: 'pending' | 'success' | 'error' = 'success'): Promise<void> {
+    const { createMessage } = await import('./database');
+    await createMessage(conversationId, content, role, metadata, status);
+  }
 }
+
 
 // Export function to get the singleton instance
 export const getLangChainService = (): LangChainService => {

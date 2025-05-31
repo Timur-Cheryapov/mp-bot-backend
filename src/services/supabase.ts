@@ -35,7 +35,7 @@ export type Message = {
   created_at: string;
   conversation_id: string;
   content: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'tool';
   metadata?: Record<string, any>;
 };
 

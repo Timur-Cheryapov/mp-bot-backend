@@ -109,7 +109,9 @@ export async function generateAndSaveResponse(
     const messages = await databaseService.getMessagesByConversationId(conversationId);
     const history = messages.map(msg => ({
       role: msg.role,
-      content: msg.content
+      content: msg.content,
+      tool_call_id: msg.metadata?.tool_call_id, // TODO: Add tool calls to messages
+      tool_name: msg.metadata?.tool_name
     }));
     
     if (stream) {
@@ -119,8 +121,10 @@ export async function generateAndSaveResponse(
         systemPrompt,
         history,
         undefined,
+        conversationId,
         userId,
-        true
+        true,
+        true // includeWildberriesTools
       );
       
       return {
@@ -133,8 +137,10 @@ export async function generateAndSaveResponse(
         systemPrompt,
         history,
         undefined,
+        conversationId,
         userId,
-        false
+        false,
+        true // includeWildberriesTools
       );
       
       // Save assistant message
@@ -157,7 +163,9 @@ export async function generateAndSaveResponse(
 
 /**
  * Save a streamed response to the database after streaming completes
+ * @deprecated - Now handled internally in the streaming process
  */
+/*
 export async function saveStreamedResponse(
   conversationId: string,
   responseContent: string
@@ -174,6 +182,7 @@ export async function saveStreamedResponse(
     throw error;
   }
 }
+*/
 
 /**
  * Store token usage information from streaming response

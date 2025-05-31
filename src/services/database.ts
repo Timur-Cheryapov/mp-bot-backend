@@ -244,8 +244,9 @@ export const getMessagesByConversationId = async (
 export const createMessage = async (
   conversationId: string,
   content: string,
-  role: 'user' | 'assistant',
-  metadata?: Record<string, any>
+  role: 'user' | 'assistant' | 'tool',
+  metadata?: Record<string, any>,
+  status: 'pending' | 'success' | 'error' = 'success'
 ): Promise<Message> => {
   try {
     const supabase = getSupabaseClient();
@@ -255,7 +256,8 @@ export const createMessage = async (
         conversation_id: conversationId, 
         content, 
         role,
-        metadata
+        metadata,
+        // TODO: Add status
       }])
       .select()
       .single();

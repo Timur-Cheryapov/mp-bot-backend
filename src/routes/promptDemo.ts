@@ -55,7 +55,9 @@ router.post('/conversation', authenticate, asyncHandler(async (req: Request, res
       // Generate response from LangChain
       const response = await langchainService.generateConversationResponse(
         systemPrompt,
-        updatedHistory
+        updatedHistory,
+        undefined,
+        conversation.id
       );
       
       // Save assistant response to database

@@ -180,7 +180,9 @@ router.post('/new', asyncHandler(async (req: Request, res: Response) => {
 
 /**
  * Save a completed streamed response to the database
+ * @deprecated - Now handled internally in the streaming process
  */
+/*
 router.post('/:conversationId/save-stream', asyncHandler(async (req: Request, res: Response) => {
   try {
     const { conversationId } = req.params;
@@ -201,6 +203,7 @@ router.post('/:conversationId/save-stream', asyncHandler(async (req: Request, re
     });
   }
 }));
+*/
 
 // Update a conversation's title
 router.patch('/:conversationId', asyncHandler(async (req: Request, res: Response) => {

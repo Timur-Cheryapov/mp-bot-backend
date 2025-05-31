@@ -9,7 +9,7 @@ type MessageStatus = 'pending' | 'success' | 'error';
 /**
  * The role of a participant in a conversation
  */
-type MessageRole = 'user' | 'assistant';
+type MessageRole = 'user' | 'assistant' | 'tool';
 
 /**
  * Simple message object for UI and API communication
