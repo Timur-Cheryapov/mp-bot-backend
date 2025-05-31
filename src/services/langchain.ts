@@ -1,19 +1,46 @@
 import { ChatOpenAI } from '@langchain/openai';
 import { OpenAIEmbeddings } from '@langchain/openai';
-import { AIMessage, AIMessageChunk, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
+import { AIMessage, AIMessageChunk, HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { ToolCall } from '@langchain/core/dist/messages/tool';
+
 import logger from '../utils/logger';
-import { estimateTokenCount, formatLangchainMessagesToBasic } from '../utils/langchainUtils';
+import { formatLangchainMessagesToBasic } from '../utils/langchainUtils';
 import { upsertDailyUsage } from './dailyUsage';
 import { DailyUsage } from './supabase';
-import { checkUserDailyUsage } from './userPlans';
-import { createWildberriesSellerProductsTool, wildberriesToolsMessages } from './wildberriesTools';
-import { ToolCall } from '@langchain/core/dist/messages/tool';
+
+// Utilities
+import { 
+  extractTokenUsage, 
+  TokenUsageResult 
+} from '../utils/tokenCostCalculator';
+import {
+  BasicMessage,
+  convertToLangChainMessages,
+  generateSystemPromptWithWildberriesTools,
+  saveMessage,
+  SaveMessageOptions
+} from '../utils/messageUtils';
+import {
+  executeTools,
+  getToolExecutionEvents,
+  parseToolExecutionResult,
+  createToolsMap
+} from '../utils/toolExecutionUtils';
+import {
+  StreamController,
+  streamAIResponse,
+  createStreamResponse
+} from '../utils/streamingUtils';
+import {
+  validateUserUsageLimit,
+  validateWildberriesToolsRequirements,
+  validateApiKey
+} from '../utils/validationUtils';
 
 // Environment variables
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 // Error messages
-const ERROR_MISSING_API_KEY = 'OpenAI API key is not defined in environment variables';
 const ERROR_INITIALIZATION = 'Failed to initialize LangChain service';
 const ERROR_MODEL_CREATION = 'Failed to create model instance';
 
@@ -31,7 +58,7 @@ export type ChatModelParams = {
   maxTokens?: number;
   modelName?: string;
   includeWildberriesTools?: boolean;
-  userId?: string; // Required when includeWildberriesTools is true
+  userId?: string;
 };
 
 export type EmbeddingModelParams = {
@@ -39,32 +66,35 @@ export type EmbeddingModelParams = {
   stripNewLines?: boolean;
 };
 
+export type ChatOptions = {
+  modelName?: string;
+  userId?: string;
+  stream?: boolean;
+  includeWildberriesTools?: boolean;
+};
+
+export type ConversationOptions = {
+  modelName?: string;
+  conversationId: string;
+  userId?: string;
+  stream?: boolean;
+  includeWildberriesTools?: boolean;
+};
+
 // Replace TokenMetrics interface
 type TokenMetrics = Omit<DailyUsage, 'id' | 'created_at' | 'updated_at'>;
 
 /**
- * Simplified LangChain service
+ * Simplified LangChain service with improved architecture
  */
 class LangChainService {
   private static instance: LangChainService;
   private initialized: boolean = false;
-  
-  // Approximate token costs per 1M tokens in USD for OpenAI models
-  private readonly TOKEN_COSTS = {
-    'gpt-4.1': { input: 2.0, output: 8.0 },
-    'gpt-4.1-mini': { input: 0.4, output: 1.6 },
-    'gpt-4o-mini': { input: 0.15, output: 0.6 },
-    'text-embedding-3-small': { input: 0.02, output: 0.02 },
-    'default': { input: 2.0, output: 2.0 }
-  };
 
   private constructor() {
     this.initialize();
   }
 
-  /**
-   * Get the singleton instance
-   */
   public static getInstance(): LangChainService {
     if (!LangChainService.instance) {
       LangChainService.instance = new LangChainService();
@@ -72,16 +102,9 @@ class LangChainService {
     return LangChainService.instance;
   }
 
-  /**
-   * Initialize the service with validation
-   */
   private initialize(): void {
     try {
-      // Validate required environment variables
-      if (!OPENAI_API_KEY) {
-        throw new Error(ERROR_MISSING_API_KEY);
-      }
-
+      validateApiKey(OPENAI_API_KEY);
       this.initialized = true;
       logger.info('LangChain service initialized successfully');
     } catch (error) {
@@ -90,9 +113,6 @@ class LangChainService {
     }
   }
 
-  /**
-   * Create a chat model instance with the specified parameters
-   */
   public async createChatModel(params: ChatModelParams = {}): Promise<ChatOpenAI | any> {
     try {
       if (!this.initialized) {
@@ -107,10 +127,7 @@ class LangChainService {
         userId
       } = params;
 
-      // Validate userId when Wildberries tools are requested
-      if (includeWildberriesTools && !userId) {
-        throw new Error('userId is required when includeWildberriesTools is true');
-      }
+      validateWildberriesToolsRequirements(includeWildberriesTools, userId);
       
       const modelConfig: any = {
         temperature,
@@ -125,14 +142,16 @@ class LangChainService {
       // Add Wildberries tools if requested
       if (includeWildberriesTools && userId) {
         try {
-          const wildberriesSellerTool = createWildberriesSellerProductsTool(userId);
-          return chatModel.bindTools([wildberriesSellerTool]);
+          const toolsByName = createToolsMap(userId);
+          const wildberriesSellerTool = toolsByName['wildberries_seller_products'];
+          if (wildberriesSellerTool) {
+            return chatModel.bindTools([wildberriesSellerTool]);
+          }
         } catch (toolError) {
           logger.warn('Failed to create Wildberries tools, returning model without tools', {
             userId,
             error: toolError instanceof Error ? toolError.message : String(toolError)
           });
-          return chatModel;
         }
       }
 
@@ -143,9 +162,6 @@ class LangChainService {
     }
   }
 
-  /**
-   * Create an embedding model instance with the specified parameters
-   */
   public createEmbeddingModel(params: EmbeddingModelParams = {}): OpenAIEmbeddings {
     try {
       if (!this.initialized) {
@@ -161,7 +177,7 @@ class LangChainService {
         modelName,
         stripNewLines,
         openAIApiKey: OPENAI_API_KEY,
-        timeout: 30000, // 30 seconds timeout
+        timeout: 30000,
       };
 
       return new OpenAIEmbeddings(modelConfig);
@@ -170,50 +186,11 @@ class LangChainService {
       throw new Error(`${ERROR_MODEL_CREATION}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-
-  /**
-   * Generate system prompt with Wildberries tools guidance
-   */
-  private generateSystemPromptWithWildberriesTools(basePrompt: string): string {
-    return `${basePrompt}
-
-You have access to Wildberries marketplace tools. When users ask about their marketplace business:
-
-1. **Use tools proactively** when users mention products, inventory, or marketplace data
-2. **Explain what you're doing** - tell users what tools you're going to call
-3. **Present data clearly** - format product information in readable tables or lists
-4. **Provide insights** - don't just show raw data, analyze trends and suggest improvements
-5. **Handle errors gracefully** - if tool calls fail:
-   - Check if the tool response contains a "userMessage" field and use that for user communication
-   - If no userMessage, explain the technical error in user-friendly terms
-   - Always offer next steps or solutions
-   - Never show raw error objects to users
-
-6. **User-friendly error handling**:
-   - API key missing: Guide them to add their Wildberries API key
-   - Permission errors: Explain they need Content category access
-   - Rate limits: Suggest waiting and trying again
-   - Network errors: Suggest trying again later
-
-Focus on being helpful for marketplace sellers and provide actionable business insights even when data isn't available.`;
-  }
   
-  /**
-   * Generate a chat completion with basic message types
-   * @param systemPrompt The system instructions
-   * @param userMessage The user's message
-   * @param options Configuration options for the chat
-   * @returns The AI's response
-   */
   public async generateChatResponse(
     systemPrompt: string,
     userMessage: string,
-    options: {
-      modelName?: string;
-      userId?: string;
-      stream?: boolean;
-      includeWildberriesTools?: boolean;
-    } = {}
+    options: ChatOptions = {}
   ): Promise<string> {
     const {
       modelName = MODEL_CONFIGS.GPT4O_MINI,
@@ -223,16 +200,10 @@ Focus on being helpful for marketplace sellers and provide actionable business i
     } = options;
 
     try {
-      // Check if user has reached their token limit
-      if (userId) {
-        const usageCheck = await checkUserDailyUsage(userId);
-        if (usageCheck.hasReachedLimit) {
-          throw new Error(`Credit limit reached. Daily limit: $${usageCheck.dailyLimitCredits.toFixed(2)}, Monthly limit: $${usageCheck.monthlyLimitCredits.toFixed(2)}. Next reset: ${usageCheck.nextResetDate}`);
-        }
-      }
+      await validateUserUsageLimit(userId);
 
       const finalSystemPrompt = includeWildberriesTools 
-        ? this.generateSystemPromptWithWildberriesTools(systemPrompt)
+        ? generateSystemPromptWithWildberriesTools(systemPrompt)
         : systemPrompt;
 
       const chatModel = await this.createChatModel({ 
@@ -250,20 +221,11 @@ Focus on being helpful for marketplace sellers and provide actionable business i
       let responseAI: AIMessage;
 
       if (stream) {
-        const stream = await chatModel.stream(messages);
-        const chunks = [];
-        for await (const chunk of stream) {
-          chunks.push(chunk);
+        const accumulatedResponse = await streamAIResponse(chatModel, messages, (chunk: any) => {
           console.log(`${chunk.content}|`);
-        }
-
-        outputText = chunks.reduce((acc, chunk) => acc.concat(chunk.content.toString()), '');
-
-        let finalChunk = chunks[0];
-        for (const chunk of chunks) {
-          finalChunk = finalChunk.concat(chunk);
-        }
-        responseAI = finalChunk as AIMessage;
+        });
+        outputText = accumulatedResponse.content.toString();
+        responseAI = accumulatedResponse as AIMessage;
       } else {
         const response = await chatModel.invoke(messages);
         outputText = response.content.toString();
@@ -278,23 +240,10 @@ Focus on being helpful for marketplace sellers and provide actionable business i
     }
   }
   
-  /**
-   * Generate a chat completion with conversation history
-   * @param systemPrompt The system instructions
-   * @param messages Array of conversation messages (role and content)
-   * @param options Configuration options for the conversation
-   * @returns The AI's response
-   */
   public async generateConversationResponse(
     systemPrompt: string,
-    messages: Array<{role: string, content: string, tool_call_id?: string, tool_name?: string, tool_calls?: ToolCall[]}>,
-    options: {
-      modelName?: string;
-      conversationId: string;
-      userId?: string;
-      stream?: boolean;
-      includeWildberriesTools?: boolean;
-    }
+    messages: BasicMessage[],
+    options: ConversationOptions
   ): Promise<string | Response> {
     const {
       modelName = MODEL_CONFIGS.GPT4O_MINI,
@@ -305,16 +254,10 @@ Focus on being helpful for marketplace sellers and provide actionable business i
     } = options;
 
     try {
-      // Check if user has reached their token limit
-      if (userId) {
-        const usageCheck = await checkUserDailyUsage(userId);
-        if (usageCheck.hasReachedLimit) {
-          throw new Error(`Credit limit reached. Daily limit: $${usageCheck.dailyLimitCredits.toFixed(2)}, Monthly limit: $${usageCheck.monthlyLimitCredits.toFixed(2)}. Next reset: ${usageCheck.nextResetDate}`);
-        }
-      }
+      await validateUserUsageLimit(userId);
 
       const finalSystemPrompt = includeWildberriesTools 
-        ? this.generateSystemPromptWithWildberriesTools(systemPrompt)
+        ? generateSystemPromptWithWildberriesTools(systemPrompt)
         : systemPrompt;
 
       const chatModel = await this.createChatModel({ 
@@ -323,19 +266,10 @@ Focus on being helpful for marketplace sellers and provide actionable business i
         userId
       });
 
-      const langchainMessages = [
-        new SystemMessage(finalSystemPrompt),
-        ...messages.map(msg => {
-          if (msg.role === 'user') return new HumanMessage(msg.content);
-          if (msg.role === 'assistant') return new AIMessage({content: msg.content, tool_calls: msg.tool_calls});
-          if (msg.role === 'tool') { return new ToolMessage(msg.content, msg.tool_call_id || 'unknown', msg.tool_name || 'unknown'); }
-          return new SystemMessage(msg.content);
-        })
-      ];
+      const langchainMessages = convertToLangChainMessages(finalSystemPrompt, messages);
 
       if (stream) {
-        // For streaming, we need to handle tool calls manually
-        return this.handleStreamingWithToolCalls(
+        return this.handleStreamingResponse(
           chatModel, 
           langchainMessages, 
           conversationId, 
@@ -345,8 +279,14 @@ Focus on being helpful for marketplace sellers and provide actionable business i
           userId
         );
       } else {
-        // For non-streaming, handle tool calls and return final response
-        return this.handleToolCallsAndGetResponse(chatModel, langchainMessages, finalSystemPrompt, messages, modelName, userId);
+        return this.handleNonStreamingResponse(
+          chatModel, 
+          langchainMessages, 
+          finalSystemPrompt, 
+          messages, 
+          modelName, 
+          userId
+        );
       }
     } catch (error) {
       logger.error(`Error generating conversation response: ${error instanceof Error ? error.message : String(error)}`);
@@ -354,21 +294,16 @@ Focus on being helpful for marketplace sellers and provide actionable business i
     }
   }
 
-  /**
-   * Handle tool calls and get final response for non-streaming mode
-   */
-  private async handleToolCallsAndGetResponse(
+  private async handleNonStreamingResponse(
     chatModel: any,
     langchainMessages: any[],
     systemPrompt: string,
-    originalMessages: Array<{role: string, content: string}>,
+    originalMessages: BasicMessage[],
     modelName: string,
     userId?: string
   ): Promise<string> {
     // First invoke to check for tool calls
     const initialResponse = await chatModel.invoke(langchainMessages);
-
-    // Track token usage for the initial response
     await this.trackTokenUsage(initialResponse, systemPrompt, originalMessages, modelName, userId);
 
     // Check if the model wants to call tools
@@ -376,7 +311,7 @@ Focus on being helpful for marketplace sellers and provide actionable business i
       logger.info(`Tool calls detected: ${initialResponse.tool_calls.map((tc: any) => tc.name).join(', ')}`);
       
       // Execute tools
-      const toolResults = await this.executeTools(initialResponse.tool_calls, userId);
+      const toolResults = await executeTools(initialResponse.tool_calls, userId);
 
       // Create new message array with tool results
       const messagesWithTools = [
@@ -395,53 +330,46 @@ Focus on being helpful for marketplace sellers and provide actionable business i
         ...toolResults.map(tr => ({ role: 'tool', content: tr.content.toString() }))
       ];
       
-      // Track token usage for the final response
       await this.trackTokenUsage(finalResponse, systemPrompt, finalMessages, modelName, userId);
       return outputText;
     } else {
       // No tool calls, return response directly
-      const outputText = initialResponse.content.toString();
-      await this.trackTokenUsage(initialResponse, systemPrompt, originalMessages, modelName, userId);
-      return outputText;
+      return initialResponse.content.toString();
     }
   }
 
-  /**
-   * Handle streaming with tool calls - implements chain of thoughts approach
-   */
-  private async handleStreamingWithToolCalls(
+  private async handleStreamingResponse(
     chatModel: any,
     langchainMessages: any[],
     conversationId: string,
     finalSystemPrompt: string,
-    messages: Array<{role: string, content: string}>,
+    messages: BasicMessage[],
     modelName: string,
     userId?: string
   ): Promise<Response> {
-    const encoder = new TextEncoder();
     const self = this; // Capture the class context
     
     const stream = new ReadableStream({
       async start(controller) {
+        const streamController = new StreamController(controller);
+        
         try {
-          // Step 1: Stream the initial response (may contain tool calls)
           logger.info('Starting chain of thoughts streaming...');
-
-          console.log('Langchain messages:', langchainMessages);
           
+          // Step 1: Stream the initial response directly without accumulation
           const streamResponse = await chatModel.stream(langchainMessages);
           let initialResponse: AIMessageChunk | null = null;
           
-          // Stream the initial AI response
+          // Stream each chunk as it arrives
           for await (const chunk of streamResponse) {
-            //console.log(chunk);
             if (chunk.content) {
-              // Send content chunk to client
-              const chunkData = JSON.stringify(chunk.content);
-              controller.enqueue(encoder.encode(`event: chunk\ndata: ${chunkData}\n\n`));
+              // Send content chunk immediately to client
+              streamController.sendChunk(typeof chunk.content === 'string' 
+                ? chunk.content 
+                : chunk.content.toString());
             }
             
-            // Accumulate the full response
+            // Accumulate the full response for later processing
             if (!initialResponse) {
               initialResponse = chunk;
             } else {
@@ -451,274 +379,198 @@ Focus on being helpful for marketplace sellers and provide actionable business i
           
           // Step 2: Save the initial AI response and track token usage
           if (initialResponse) {
-            try {
-              await self.saveMessage({
-                conversationId,
-                content: initialResponse.content ? initialResponse.content.toString() : '',
-                role: 'assistant',
-                toolCalls: initialResponse.tool_calls && initialResponse.tool_calls.length > 0 ? initialResponse.tool_calls : undefined
-              });
-              logger.info('Saved initial AI response to database');
-              
-              // Track token usage for initial response
-              if (initialResponse && userId) {
-                await self.trackTokenUsage(initialResponse, finalSystemPrompt, messages, modelName, userId);
-              }
-            } catch (saveError) {
-              logger.error('Failed to save initial AI response:', saveError);
-            }
+            await self.saveInitialResponse(initialResponse, conversationId, finalSystemPrompt, messages, modelName, userId);
           }
           
-          // Step 3: Check if there are tool calls to execute
+          // Step 3: Handle tool calls if present
           if (initialResponse?.tool_calls && initialResponse.tool_calls.length > 0) {
-            logger.info(`Tool calls detected in streaming: ${initialResponse.tool_calls.map((tc: any) => tc.name).join(', ')}`);
-            
-            // Send tool_execution notification
-            const toolExecutionEvent = initialResponse.tool_calls.map((tc: ToolCall) => {
-              return {
-                message: wildberriesToolsMessages[tc.name as keyof typeof wildberriesToolsMessages].pending,
-                toolName: tc.name
-              };
-            });
-            controller.enqueue(encoder.encode(`event: tool_execution\ndata: ${JSON.stringify(toolExecutionEvent)}\n\n`));
-            
-            // Step 4: Execute tools and save tool messages
-            const toolResults = await self.executeTools(initialResponse.tool_calls, userId);
-            let toolCompleteEvent: {message: string, toolName: string, status: 'success' | 'error'}[] = [];
-            
-            // Save tool messages to database
-            for (const toolResult of toolResults) {
-              try {
-                // Parse the tool result content to handle errors properly
-                let messageContent = toolResult.content.toString();
-                let messageStatus: 'success' | 'error' = 'success';
-                
-                try {
-                  const parsedContent = JSON.parse(messageContent);
-                  
-                  // If the tool returned an error structure, extract the error message and set error status
-                  if (parsedContent && !parsedContent.success && parsedContent.error) {
-                    messageContent = parsedContent.error;
-                    messageStatus = 'error';
-                  } else if (parsedContent && parsedContent.success) {
-                    // For successful responses, keep the full JSON for assistant processing
-                    // messageContent = messageContent;
-                    messageStatus = 'success';
-                  }
-                } catch (parseError) {
-                  // If JSON parsing fails, treat as error and use raw content
-                  messageStatus = 'error';
-                  logger.warn('Failed to parse tool result JSON, treating as error', { 
-                    toolCallId: toolResult.tool_call_id,
-                    content: messageContent
-                  });
-                }
-                
-                await self.saveMessage({
-                  conversationId,
-                  content: messageContent,
-                  role: 'tool',
-                  status: messageStatus,
-                  toolCallId: toolResult.tool_call_id,
-                  toolName: initialResponse.tool_calls.find((tc: any) => tc.id === toolResult.tool_call_id)?.name
-                });
-
-                toolCompleteEvent.push({
-                  message: messageContent,
-                  toolName: toolResult.name || '',
-                  status: messageStatus
-                });
-                logger.info(`Saved tool message to database: ${toolResult.tool_call_id} (status: ${messageStatus})`);
-              } catch (saveError) {
-                logger.error('Failed to save tool message:', saveError);
-              }
-            }
-
-            // Send tool_complete event
-            controller.enqueue(encoder.encode(`event: tool_complete\ndata: ${JSON.stringify(toolCompleteEvent)}\n\n`));
-            
-            // Step 5: Create messages with tool results and get final response
-            const messagesWithTools = [
-              ...langchainMessages,
+            await self.handleToolCallsInStream(
+              chatModel,
+              langchainMessages,
               initialResponse,
-              ...toolResults
-            ];
-            
-            // Step 6: Stream the final response with tool results
-            const finalStreamResponse = await chatModel.stream(messagesWithTools);
-            let finalResponse: AIMessageChunk | null = null;
-            
-            for await (const chunk of finalStreamResponse) {
-              if (chunk.content) {
-                // Send final response content
-                const chunkData = JSON.stringify(chunk.content);
-                controller.enqueue(encoder.encode(`event: chunk\ndata: ${chunkData}\n\n`));
-              }
-              
-              // Accumulate the final response for token tracking
-              if (!finalResponse) {
-                finalResponse = chunk;
-              } else {
-                finalResponse = finalResponse.concat(chunk);
-              }
-            }
-            
-            // Step 7: Save the final AI response and track token usage
-            if (finalResponse && finalResponse.content && finalResponse.content.toString().trim()) {
-              try {
-                await self.saveMessage({
-                  conversationId,
-                  content: finalResponse.content.toString(),
-                  role: 'assistant'
-                });
-                logger.info('Saved final AI response to database');
-                
-                // Track token usage for final response
-                if (finalResponse && userId) {
-                  // Create updated message history including tool results for accurate token calculation
-                  const updatedMessages = [
-                    ...messages,
-                    { role: 'assistant', content: finalResponse.content.toString() },
-                    ...toolResults.map(tr => ({ role: 'tool', content: tr.content.toString() }))
-                  ];
-                  await self.trackTokenUsage(finalResponse, finalSystemPrompt, updatedMessages, modelName, userId);
-                }
-              } catch (saveError) {
-                logger.error('Failed to save final AI response:', saveError);
-              }
-            }
+              conversationId,
+              streamController,
+              finalSystemPrompt,
+              messages,
+              modelName,
+              userId
+            );
           }
           
-          // Step 8: Send end event
-          controller.enqueue(encoder.encode(`event: end\ndata: {}\n\n`));
-          controller.close();
+          streamController.sendEnd();
           
         } catch (error) {
           logger.error('Error in chain of thoughts streaming:', error);
-          const errorData = JSON.stringify({
-            error: error instanceof Error ? error.message : 'Unknown error occurred'
-          });
-          controller.enqueue(encoder.encode(`event: error\ndata: ${errorData}\n\n`));
-          controller.close();
+          streamController.sendError(error instanceof Error ? error.message : 'Unknown error occurred');
         }
       }
     });
 
-    return new Response(stream, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive'
-      }
-    });
+    return createStreamResponse(stream);
   }
 
-  /**
-   * Execute tool calls and return ToolMessage objects
-   */
-  private async executeTools(toolCalls: any[], userId?: string): Promise<ToolMessage[]> {
-    const toolResults: ToolMessage[] = [];
+  private async saveInitialResponse(
+    initialResponse: AIMessageChunk,
+    conversationId: string,
+    finalSystemPrompt: string,
+    messages: BasicMessage[],
+    modelName: string,
+    userId?: string
+  ): Promise<void> {
+    try {
+      await saveMessage({
+        conversationId,
+        content: typeof initialResponse.content === 'string' 
+          ? initialResponse.content 
+          : initialResponse.content?.toString() || '',
+        role: 'assistant',
+        toolCalls: initialResponse.tool_calls && initialResponse.tool_calls.length > 0 ? initialResponse.tool_calls : undefined
+      });
+      logger.info('Saved initial AI response to database');
+      
+      if (userId) {
+        await this.trackTokenUsage(initialResponse, finalSystemPrompt, messages, modelName, userId);
+      }
+    } catch (saveError) {
+      logger.error('Failed to save initial AI response:', saveError);
+    }
+  }
 
-    // Create tools map
-    const toolsByName: Record<string, any> = {};
+  private async handleToolCallsInStream(
+    chatModel: any,
+    langchainMessages: any[],
+    initialResponse: AIMessageChunk,
+    conversationId: string,
+    streamController: StreamController,
+    finalSystemPrompt: string,
+    messages: BasicMessage[],
+    modelName: string,
+    userId?: string
+  ): Promise<void> {
+    if (!initialResponse.tool_calls || initialResponse.tool_calls.length === 0) {
+      return;
+    }
+
+    logger.info(`Tool calls detected in streaming: ${initialResponse.tool_calls.map((tc: any) => tc.name).join(', ')}`);
     
-    if (userId) {
+    // Send tool execution notification
+    const toolExecutionEvents = getToolExecutionEvents(initialResponse.tool_calls);
+    streamController.sendToolExecution(toolExecutionEvents);
+    
+    // Execute tools and save tool messages
+    const toolResults = await executeTools(initialResponse.tool_calls, userId);
+    const toolCompleteEvents: Array<{message: string, toolName: string, status: 'success' | 'error'}> = [];
+    
+    // Save tool messages to database
+    for (const toolResult of toolResults) {
+      const parsedResult = parseToolExecutionResult(toolResult, initialResponse.tool_calls);
+      
       try {
-        const wildberriesSellerTool = createWildberriesSellerProductsTool(userId);
-        toolsByName['wildberries_seller_products'] = wildberriesSellerTool;
-      } catch (error) {
-        logger.warn('Failed to create Wildberries tool for execution', { userId, error });
-      }
-    }
-
-    // Execute each tool call
-    for (const toolCall of toolCalls) {
-      try {
-        const selectedTool = toolsByName[toolCall.name];
-        if (selectedTool) {
-          logger.info(`Executing tool: ${toolCall.name}`, { args: toolCall.args });
-          
-          // Use LangChain's built-in tool invocation which returns a ToolMessage
-          const toolMessage = await selectedTool.invoke(toolCall);
-          toolResults.push(toolMessage);
-        } else {
-          logger.error(`Tool not found: ${toolCall.name}`);
-          // Create an error ToolMessage for unknown tools
-          const errorMessage = new ToolMessage({
-            content: `Tool '${toolCall.name}' not found`,
-            tool_call_id: toolCall.id,
-            status: 'error'
-          });
-          toolResults.push(errorMessage);
-        }
-      } catch (error) {
-        logger.error(`Tool execution failed for ${toolCall.name}:`, error);
-        // Create an error ToolMessage for failed executions
-        const errorMessage = new ToolMessage({
-          content: "Tool execution failed",
-          tool_call_id: toolCall.id,
-          status: 'error'
+        await saveMessage({
+          conversationId,
+          content: parsedResult.userFriendlyMessage,
+          role: 'tool',
+          status: parsedResult.status,
+          toolCallId: toolResult.tool_call_id,
+          toolName: parsedResult.toolName
         });
-        toolResults.push(errorMessage);
+
+        toolCompleteEvents.push({
+          message: parsedResult.userFriendlyMessage,
+          toolName: parsedResult.toolName,
+          status: parsedResult.status
+        });
+        
+        logger.info(`Saved tool message to database: ${toolResult.tool_call_id} (status: ${parsedResult.status})`);
+      } catch (saveError) {
+        logger.error('Failed to save tool message:', saveError);
       }
     }
 
-    return toolResults;
+    // Send tool complete event
+    streamController.sendToolComplete(toolCompleteEvents);
+    
+    // Get final response with tool results
+    const messagesWithTools = [
+      ...langchainMessages,
+      initialResponse,
+      ...toolResults
+    ];
+    
+    // Stream the final response directly
+    const finalStreamResponse = await chatModel.stream(messagesWithTools);
+    let finalResponse: AIMessageChunk | null = null;
+    
+    for await (const chunk of finalStreamResponse) {
+      if (chunk.content) {
+        // Send final response content immediately
+        streamController.sendChunk(typeof chunk.content === 'string' 
+          ? chunk.content 
+          : chunk.content.toString());
+      }
+      
+      // Accumulate the final response for token tracking
+      if (!finalResponse) {
+        finalResponse = chunk;
+      } else {
+        finalResponse = finalResponse.concat(chunk);
+      }
+    }
+    
+    // Save the final AI response and track token usage
+    if (finalResponse && finalResponse.content && finalResponse.content.toString().trim()) {
+      try {
+        await saveMessage({
+          conversationId,
+          content: typeof finalResponse.content === 'string' 
+            ? finalResponse.content 
+            : finalResponse.content.toString(),
+          role: 'assistant'
+        });
+        logger.info('Saved final AI response to database');
+        
+        if (userId) {
+          const updatedMessages = [
+            ...messages,
+            { role: 'assistant', content: finalResponse.content.toString() },
+            ...toolResults.map(tr => ({ role: 'tool', content: tr.content.toString() }))
+          ];
+          await this.trackTokenUsage(finalResponse, finalSystemPrompt, updatedMessages, modelName, userId);
+        }
+      } catch (saveError) {
+        logger.error('Failed to save final AI response:', saveError);
+      }
+    }
   }
 
-  /**
-   * Tracks token usage from response metadata and updates DailyUsage
-   */
   private async trackTokenUsage(
-    responseAI: AIMessage,
+    responseAI: AIMessage | AIMessageChunk,
     systemPrompt: string,
     messages: Array<{role: string, content: string}>,
     modelName: string,
     userId?: string
   ): Promise<void> {
-    let inputTokens = 0;
-    let outputTokens = 0;
-    let isEstimated = false;
+    const tokenUsage = extractTokenUsage(responseAI, systemPrompt, messages, modelName);
+    
+    logger.info(
+      `Token usage - Input: ${tokenUsage.inputTokens}, Output: ${tokenUsage.outputTokens}, ` +
+      `Cost: $${tokenUsage.totalCost.toFixed(6)} ${tokenUsage.isEstimated ? '(Estimated)' : '(Actual)'}`
+    );
 
-    if (responseAI && responseAI.response_metadata && responseAI.response_metadata.tokenUsage) {
-      const tokenUsage = responseAI.response_metadata.tokenUsage;
-      inputTokens = tokenUsage.promptTokens;
-      outputTokens = tokenUsage.completionTokens;
-      logger.info(`Token usage from response metadata - Input: ${inputTokens}, Output: ${outputTokens}`);
-    } else if (responseAI && responseAI.usage_metadata) {
-      const usageMetadata = responseAI.usage_metadata;
-      inputTokens = usageMetadata.input_tokens;
-      outputTokens = usageMetadata.output_tokens;
-      logger.info(`Token usage from usage metadata - Input: ${inputTokens}, Output: ${outputTokens}`);
-    } else {
-      const inputText = [systemPrompt, ...messages.map(m => m.content)].join('\n');
-      const outputText = responseAI.content.toString();
-      inputTokens = estimateTokenCount(inputText);
-      outputTokens = estimateTokenCount(outputText);
-      isEstimated = true;
-      logger.warn(`Using estimated token counts - Input: ${inputTokens}, Output: ${outputTokens}`);
-    }
-
-    // Calculate cost
-    const costRates = this.TOKEN_COSTS[modelName as keyof typeof this.TOKEN_COSTS] || this.TOKEN_COSTS.default;
-    const inputCost = (inputTokens / 1000000) * costRates.input;
-    const outputCost = (outputTokens / 1000000) * costRates.output;
-    const totalCost = inputCost + outputCost;
-
-    logger.info(`Cost calculation for ${modelName}. Total: $${totalCost.toFixed(6)} ${isEstimated ? '(Estimated)' : '(Actual)'}`);
-
-    // Upsert to daily_usage
     if (userId) {
       const today = new Date().toISOString().slice(0, 10);
-      await upsertDailyUsage(userId, today, modelName, inputTokens, outputTokens, totalCost);
+      await upsertDailyUsage(
+        userId, 
+        today, 
+        modelName, 
+        tokenUsage.inputTokens, 
+        tokenUsage.outputTokens, 
+        tokenUsage.totalCost
+      );
     }
   }
 
-  /**
-   * Get usage metrics for a user (today, all models)
-   */
   public async getMetrics(userId: string, date?: string): Promise<TokenMetrics[]> {
-    // Import getAllDailyUsage dynamically to avoid circular deps
     const { getAllDailyUsage } = await import('./dailyUsage');
     const usage = await getAllDailyUsage(userId, date);
     return usage.map(u => ({
@@ -731,43 +583,15 @@ Focus on being helpful for marketplace sellers and provide actionable business i
     }));
   }
 
-  /**
-   * Reset metrics for a user (set tokens/cost to 0 for today)
-   */
   public async resetMetrics(userId: string): Promise<void> {
     const today = new Date().toISOString().slice(0, 10);
-    // Get all models for today
     const { getAllDailyUsage, upsertDailyUsage } = await import('./dailyUsage');
     const usage = await getAllDailyUsage(userId, today);
     await Promise.all(
       usage.map(u => upsertDailyUsage(u.user_id, today, u.model, 0, 0, 0))
     );
   }
-
-  private async saveMessage(options: {
-    conversationId: string;
-    content: string;
-    role: 'user' | 'assistant' | 'tool';
-    metadata?: Record<string, any>;
-    status?: 'pending' | 'success' | 'error';
-    toolCalls?: any[];
-    toolCallId?: string;
-    toolName?: string;
-  }): Promise<void> {
-    const { createMessage } = await import('./database');
-    await createMessage(
-      options.conversationId,
-      options.content,
-      options.role,
-      options.metadata,
-      options.status || 'success',
-      options.toolCalls,
-      options.toolCallId,
-      options.toolName
-    );
-  }
 }
-
 
 // Export function to get the singleton instance
 export const getLangChainService = (): LangChainService => {
