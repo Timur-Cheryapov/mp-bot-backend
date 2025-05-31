@@ -16,7 +16,6 @@ import {
 import {
   BasicMessage,
   convertToLangChainMessages,
-  generateSystemPromptWithWildberriesTools,
   saveMessage,
   SaveMessageOptions
 } from '../utils/messageUtils';
@@ -202,9 +201,7 @@ class LangChainService {
     try {
       await validateUserUsageLimit(userId);
 
-      const finalSystemPrompt = includeWildberriesTools 
-        ? generateSystemPromptWithWildberriesTools(systemPrompt)
-        : systemPrompt;
+      const finalSystemPrompt = systemPrompt;
 
       const chatModel = await this.createChatModel({ 
         modelName, 
@@ -256,9 +253,7 @@ class LangChainService {
     try {
       await validateUserUsageLimit(userId);
 
-      const finalSystemPrompt = includeWildberriesTools 
-        ? generateSystemPromptWithWildberriesTools(systemPrompt)
-        : systemPrompt;
+      const finalSystemPrompt = systemPrompt;
 
       const chatModel = await this.createChatModel({ 
         modelName,
@@ -285,7 +280,8 @@ class LangChainService {
           finalSystemPrompt, 
           messages, 
           modelName, 
-          userId
+          userId,
+          conversationId
         );
       }
     } catch (error) {
@@ -300,7 +296,8 @@ class LangChainService {
     systemPrompt: string,
     originalMessages: BasicMessage[],
     modelName: string,
-    userId?: string
+    userId?: string,
+    conversationId?: string
   ): Promise<string> {
     // First invoke to check for tool calls
     const initialResponse = await chatModel.invoke(langchainMessages);
@@ -310,8 +307,34 @@ class LangChainService {
     if (initialResponse.tool_calls && initialResponse.tool_calls.length > 0) {
       logger.info(`Tool calls detected: ${initialResponse.tool_calls.map((tc: any) => tc.name).join(', ')}`);
       
+      // Save initial response with tool calls if we have a conversationId
+      if (conversationId) {
+        await saveMessage({
+          conversationId,
+          content: initialResponse.content?.toString() || '',
+          role: 'assistant',
+          toolCalls: initialResponse.tool_calls
+        });
+      }
+      
       // Execute tools
       const toolResults = await executeTools(initialResponse.tool_calls, userId);
+
+      // Save tool messages if we have a conversationId
+      if (conversationId) {
+        for (const toolResult of toolResults) {
+          const parsedResult = parseToolExecutionResult(toolResult, initialResponse.tool_calls);
+          
+          await saveMessage({
+            conversationId,
+            content: parsedResult.userFriendlyMessage,
+            role: 'tool',
+            status: parsedResult.status,
+            toolCallId: toolResult.tool_call_id,
+            toolName: parsedResult.toolName
+          });
+        }
+      }
 
       // Create new message array with tool results
       const messagesWithTools = [
@@ -331,10 +354,31 @@ class LangChainService {
       ];
       
       await this.trackTokenUsage(finalResponse, systemPrompt, finalMessages, modelName, userId);
+      
+      // Save final response if we have a conversationId
+      if (conversationId) {
+        await saveMessage({
+          conversationId,
+          content: outputText,
+          role: 'assistant'
+        });
+      }
+      
       return outputText;
     } else {
       // No tool calls, return response directly
-      return initialResponse.content.toString();
+      const outputText = initialResponse.content.toString();
+      
+      // Save the response if we have a conversationId
+      if (conversationId) {
+        await saveMessage({
+          conversationId,
+          content: outputText,
+          role: 'assistant'
+        });
+      }
+      
+      return outputText;
     }
   }
 

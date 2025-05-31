@@ -7,6 +7,7 @@ import { convertConversationToUi, convertMessageToUi } from '../utils/fromDbToUi
 import { handleErrorResponse, validateRequiredFields } from '../utils/responseHandlers';
 import { handleStreamingResponse } from '../utils/streamingUtils';
 import { BadRequestError, NotFoundError } from '../utils/errors';
+import { WILDBERRIES_SYSTEM_PROMPT } from '../utils/messageUtils';
 
 // Extend the Express Request type to include the conversation property
 declare global {
@@ -78,7 +79,7 @@ router.post(['/', '/:conversationId'], asyncHandler(async (req: Request, res: Re
       message, 
       conversationId: conversationIdFromBody = null,
       title = 'New Conversation',
-      systemPrompt = "You are a helpful assistant.", // TODO: Take systemPrompt from langchain.ts
+      systemPrompt = WILDBERRIES_SYSTEM_PROMPT,
       stream = false
     } = req.body;
     
@@ -150,33 +151,6 @@ router.post(['/', '/:conversationId'], asyncHandler(async (req: Request, res: Re
     handleErrorResponse(error, res, 'process chat message');
   }
 }));
-
-/**
- * Save a completed streamed response to the database
- * @deprecated - Now handled internally in the streaming process
- */
-/*
-router.post('/:conversationId/save-stream', asyncHandler(async (req: Request, res: Response) => {
-  try {
-    const { conversationId } = req.params;
-    const { content } = req.body;
-    
-    if (!content) {
-      return res.status(400).json({ error: 'Content is required' });
-    }
-    
-    await conversationService.saveStreamedResponse(conversationId, content);
-    
-    res.json({ success: true, conversationId });
-  } catch (error) {
-    logger.error(`Error saving streamed response: ${error instanceof Error ? error.message : String(error)}`);
-    res.status(500).json({ 
-      error: 'Failed to save streamed response',
-      details: error instanceof Error ? error.message : String(error)
-    });
-  }
-}));
-*/
 
 // Update a conversation's title
 router.patch('/:conversationId', asyncHandler(async (req: Request, res: Response) => {
