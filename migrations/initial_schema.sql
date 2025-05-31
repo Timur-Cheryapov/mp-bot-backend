@@ -57,12 +57,21 @@ CREATE TABLE IF NOT EXISTS public.messages (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()) NOT NULL,
   conversation_id UUID NOT NULL REFERENCES public.conversations(id) ON DELETE CASCADE,
   content TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+  role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'tool')),
+  -- Tool call fields for assistant messages (when AI calls tools)
+  tool_calls JSONB DEFAULT NULL, -- Array of tool calls for assistant messages
+  -- Tool message fields (for tool responses)
+  tool_call_id TEXT DEFAULT NULL, -- Reference to the tool call ID for tool messages
+  tool_name TEXT DEFAULT NULL, -- Name of the tool that was called
+  status TEXT DEFAULT NULL CHECK (status IS NULL OR status IN ('pending', 'success', 'error')), -- Status for tool messages
   metadata JSONB DEFAULT '{}'::jsonb
 );
 
--- Create index for faster queries
+-- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON public.messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_messages_tool_call_id ON public.messages(tool_call_id) WHERE tool_call_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_messages_role ON public.messages(role);
+CREATE INDEX IF NOT EXISTS idx_messages_status ON public.messages(status) WHERE status IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON public.conversations(user_id);
 
 -- RLS for messages table

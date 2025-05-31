@@ -1,6 +1,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import logger from '../utils/logger';
 import dotenv from 'dotenv';
+import { ToolCall } from '@langchain/core/dist/messages/tool';
 
 // Load environment variables
 dotenv.config();
@@ -36,6 +37,10 @@ export type Message = {
   conversation_id: string;
   content: string;
   role: 'user' | 'assistant' | 'tool';
+  tool_calls?: ToolCall[]; // Array of tool calls for assistant messages
+  tool_call_id?: string; // Reference to tool call ID for tool messages
+  tool_name?: string; // Name of the tool for tool messages
+  status?: 'pending' | 'success' | 'error'; // Status for tool messages
   metadata?: Record<string, any>;
 };
 

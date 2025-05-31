@@ -2,7 +2,7 @@ import { PostgrestError } from '@supabase/supabase-js';
 import logger from '../utils/logger';
 import { getSupabaseClient } from './supabase';
 import { Conversation, Message, User } from './supabase';
-
+import { ToolCall } from '@langchain/core/dist/messages/tool';
 /**
  * Database utility functions for common operations
  */
@@ -246,7 +246,10 @@ export const createMessage = async (
   content: string,
   role: 'user' | 'assistant' | 'tool',
   metadata?: Record<string, any>,
-  status: 'pending' | 'success' | 'error' = 'success'
+  status: 'pending' | 'success' | 'error' = 'success',
+  toolCalls?: ToolCall[],
+  toolCallId?: string,
+  toolName?: string
 ): Promise<Message> => {
   try {
     const supabase = getSupabaseClient();
@@ -257,7 +260,10 @@ export const createMessage = async (
         content, 
         role,
         metadata,
-        // TODO: Add status
+        status,
+        tool_calls: toolCalls,
+        tool_call_id: toolCallId,
+        tool_name: toolName
       }])
       .select()
       .single();

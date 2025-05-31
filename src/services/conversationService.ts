@@ -107,12 +107,31 @@ export async function generateAndSaveResponse(
     
     // Get history
     const messages = await databaseService.getMessagesByConversationId(conversationId);
-    const history = messages.map(msg => ({
-      role: msg.role,
-      content: msg.content,
-      tool_call_id: msg.metadata?.tool_call_id, // TODO: Add tool calls to messages
-      tool_name: msg.metadata?.tool_name
-    }));
+    const history = messages.map(msg => {
+      const baseMessage = {
+        role: msg.role,
+        content: msg.content,
+      };
+      
+      // Add tool-specific fields for tool messages
+      if (msg.role === 'tool') {
+        return {
+          ...baseMessage,
+          tool_call_id: msg.tool_call_id,
+          tool_name: msg.tool_name
+        };
+      }
+
+      // Add tool-specific fields for assistant messages
+      if (msg.role === 'assistant') {
+        return {
+          ...baseMessage,
+          tool_calls: msg.tool_calls
+        };
+      }
+      
+      return baseMessage;
+    });
     
     if (stream) {
       // For streaming, pass through the Response object

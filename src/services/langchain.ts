@@ -7,6 +7,7 @@ import { upsertDailyUsage } from './dailyUsage';
 import { DailyUsage } from './supabase';
 import { checkUserDailyUsage } from './userPlans';
 import { createWildberriesSellerProductsTool } from './wildberriesTools';
+import { ToolCall } from '@langchain/core/dist/messages/tool';
 
 // Environment variables
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -280,7 +281,7 @@ Focus on being helpful for marketplace sellers and provide actionable business i
    */
   public async generateConversationResponse(
     systemPrompt: string,
-    messages: Array<{role: string, content: string, tool_call_id?: string, tool_name?: string}>, // TODO: Add tool calls to messages
+    messages: Array<{role: string, content: string, tool_call_id?: string, tool_name?: string, tool_calls?: ToolCall[]}>,
     modelName: string = MODEL_CONFIGS.GPT4O_MINI,
     conversationId: string,
     userId?: string,
@@ -310,7 +311,7 @@ Focus on being helpful for marketplace sellers and provide actionable business i
         new SystemMessage(finalSystemPrompt),
         ...messages.map(msg => {
           if (msg.role === 'user') return new HumanMessage(msg.content);
-          if (msg.role === 'assistant') return new AIMessage(msg.content); // TODO: Add tool calls to assistant messages
+          if (msg.role === 'assistant') return new AIMessage({content: msg.content, tool_calls: msg.tool_calls});
           if (msg.role === 'tool') { return new ToolMessage(msg.content, msg.tool_call_id || 'unknown', msg.tool_name || 'unknown'); }
           return new SystemMessage(msg.content);
         })
@@ -435,10 +436,14 @@ Focus on being helpful for marketplace sellers and provide actionable business i
           // Step 2: Save the initial AI response and track token usage
           if (initialResponse) {
             try {
-              await self.saveMessage(conversationId, initialResponse.content.toString(), 'assistant', {
-                tool_call_id: initialResponse.tool_calls?.map((tc: any) => tc.id),
-                tool_name: initialResponse.tool_calls?.map((tc: any) => tc.name)
-              });
+              await self.saveMessage(
+                conversationId, 
+                initialResponse.content ? initialResponse.content.toString() : 'Processing...', 
+                'assistant',
+                undefined, // metadata
+                undefined, // status
+                initialResponse.tool_calls.length > 0 ? initialResponse.tool_calls : undefined // tool_calls for assistant message
+              );
               logger.info('Saved initial AI response to database');
               
               // Track token usage for initial response
@@ -467,17 +472,42 @@ Focus on being helpful for marketplace sellers and provide actionable business i
             // Save tool messages to database
             for (const toolResult of toolResults) {
               try {
+                // Parse the tool result content to handle errors properly
+                let messageContent = toolResult.content.toString();
+                let messageStatus: 'success' | 'error' = 'success';
+                
+                try {
+                  const parsedContent = JSON.parse(messageContent);
+                  
+                  // If the tool returned an error structure, extract the error message and set error status
+                  if (parsedContent && !parsedContent.success && parsedContent.error) {
+                    messageContent = parsedContent.error;
+                    messageStatus = 'error';
+                  } else if (parsedContent && parsedContent.success) {
+                    // For successful responses, keep the full JSON for assistant processing
+                    // messageContent = messageContent;
+                    messageStatus = 'success';
+                  }
+                } catch (parseError) {
+                  // If JSON parsing fails, treat as error and use raw content
+                  messageStatus = 'error';
+                  logger.warn('Failed to parse tool result JSON, treating as error', { 
+                    toolCallId: toolResult.tool_call_id,
+                    content: messageContent
+                  });
+                }
+                
                 await self.saveMessage(
                   conversationId,
-                  ((toolResult.content as any).error || (toolResult.content as any)).toString(),
+                  messageContent,
                   'tool',
-                  {
-                    tool_call_id: toolResult.tool_call_id,
-                    tool_name: initialResponse.tool_calls.find((tc: any) => tc.id === toolResult.tool_call_id)?.name
-                  },
-                  toolResult.status === 'error' ? 'error' : 'success'
+                  undefined, // metadata
+                  messageStatus, // status based on tool result
+                  undefined, // tool_calls (only for assistant messages)
+                  toolResult.tool_call_id, // tool_call_id
+                  initialResponse.tool_calls.find((tc: any) => tc.id === toolResult.tool_call_id)?.name // tool_name
                 );
-                logger.info(`Saved tool message to database: ${toolResult.tool_call_id}`);
+                logger.info(`Saved tool message to database: ${toolResult.tool_call_id} (status: ${messageStatus})`);
               } catch (saveError) {
                 logger.error('Failed to save tool message:', saveError);
               }
@@ -689,9 +719,18 @@ Focus on being helpful for marketplace sellers and provide actionable business i
     );
   }
 
-  private async saveMessage(conversationId: string, content: string, role: 'user' | 'assistant' | 'tool', metadata?: Record<string, any>, status: 'pending' | 'success' | 'error' = 'success'): Promise<void> {
+  private async saveMessage(
+    conversationId: string, 
+    content: string, 
+    role: 'user' | 'assistant' | 'tool', 
+    metadata?: Record<string, any>, 
+    status: 'pending' | 'success' | 'error' = 'success',
+    toolCalls?: any[],
+    toolCallId?: string,
+    toolName?: string
+  ): Promise<void> {
     const { createMessage } = await import('./database');
-    await createMessage(conversationId, content, role, metadata, status);
+    await createMessage(conversationId, content, role, metadata, status, toolCalls, toolCallId, toolName);
   }
 }
 
