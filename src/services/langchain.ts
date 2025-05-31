@@ -1,12 +1,12 @@
 import { ChatOpenAI } from '@langchain/openai';
 import { OpenAIEmbeddings } from '@langchain/openai';
-import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
+import { AIMessage, AIMessageChunk, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
 import logger from '../utils/logger';
 import { estimateTokenCount, formatLangchainMessagesToBasic } from '../utils/langchainUtils';
 import { upsertDailyUsage } from './dailyUsage';
 import { DailyUsage } from './supabase';
 import { checkUserDailyUsage } from './userPlans';
-import { createWildberriesSellerProductsTool } from './wildberriesTools';
+import { createWildberriesSellerProductsTool, wildberriesToolsMessages } from './wildberriesTools';
 import { ToolCall } from '@langchain/core/dist/messages/tool';
 
 // Environment variables
@@ -430,7 +430,7 @@ Focus on being helpful for marketplace sellers and provide actionable business i
           console.log('Langchain messages:', langchainMessages);
           
           const streamResponse = await chatModel.stream(langchainMessages);
-          let initialResponse: any = null;
+          let initialResponse: AIMessageChunk | null = null;
           
           // Stream the initial AI response
           for await (const chunk of streamResponse) {
@@ -454,9 +454,9 @@ Focus on being helpful for marketplace sellers and provide actionable business i
             try {
               await self.saveMessage({
                 conversationId,
-                content: initialResponse.content ? initialResponse.content.toString() : 'Processing...',
+                content: initialResponse.content ? initialResponse.content.toString() : '',
                 role: 'assistant',
-                toolCalls: initialResponse.tool_calls.length > 0 ? initialResponse.tool_calls : undefined
+                toolCalls: initialResponse.tool_calls && initialResponse.tool_calls.length > 0 ? initialResponse.tool_calls : undefined
               });
               logger.info('Saved initial AI response to database');
               
@@ -473,15 +473,18 @@ Focus on being helpful for marketplace sellers and provide actionable business i
           if (initialResponse?.tool_calls && initialResponse.tool_calls.length > 0) {
             logger.info(`Tool calls detected in streaming: ${initialResponse.tool_calls.map((tc: any) => tc.name).join(', ')}`);
             
-            // Send tool execution notification
-            const toolNotification = {
-              message: "Let me fetch your Wildberries product data...",
-              toolCalls: initialResponse.tool_calls.map((tc: any) => tc.name)
-            };
-            controller.enqueue(encoder.encode(`event: tool_execution\ndata: ${JSON.stringify(toolNotification)}\n\n`));
+            // Send tool_execution notification
+            const toolExecutionEvent = initialResponse.tool_calls.map((tc: ToolCall) => {
+              return {
+                message: wildberriesToolsMessages[tc.name as keyof typeof wildberriesToolsMessages].pending,
+                toolName: tc.name
+              };
+            });
+            controller.enqueue(encoder.encode(`event: tool_execution\ndata: ${JSON.stringify(toolExecutionEvent)}\n\n`));
             
             // Step 4: Execute tools and save tool messages
             const toolResults = await self.executeTools(initialResponse.tool_calls, userId);
+            let toolCompleteEvent: {message: string, toolName: string, status: 'success' | 'error'}[] = [];
             
             // Save tool messages to database
             for (const toolResult of toolResults) {
@@ -519,11 +522,20 @@ Focus on being helpful for marketplace sellers and provide actionable business i
                   toolCallId: toolResult.tool_call_id,
                   toolName: initialResponse.tool_calls.find((tc: any) => tc.id === toolResult.tool_call_id)?.name
                 });
+
+                toolCompleteEvent.push({
+                  message: messageContent,
+                  toolName: toolResult.name || '',
+                  status: messageStatus
+                });
                 logger.info(`Saved tool message to database: ${toolResult.tool_call_id} (status: ${messageStatus})`);
               } catch (saveError) {
                 logger.error('Failed to save tool message:', saveError);
               }
             }
+
+            // Send tool_complete event
+            controller.enqueue(encoder.encode(`event: tool_complete\ndata: ${JSON.stringify(toolCompleteEvent)}\n\n`));
             
             // Step 5: Create messages with tool results and get final response
             const messagesWithTools = [
@@ -532,12 +544,9 @@ Focus on being helpful for marketplace sellers and provide actionable business i
               ...toolResults
             ];
             
-            // Send separator to indicate we're moving to final response
-            controller.enqueue(encoder.encode(`event: tool_complete\ndata: ${JSON.stringify({message: "Processing results..."})}\n\n`));
-            
             // Step 6: Stream the final response with tool results
             const finalStreamResponse = await chatModel.stream(messagesWithTools);
-            let finalResponse: any = null;
+            let finalResponse: AIMessageChunk | null = null;
             
             for await (const chunk of finalStreamResponse) {
               if (chunk.content) {
@@ -555,7 +564,7 @@ Focus on being helpful for marketplace sellers and provide actionable business i
             }
             
             // Step 7: Save the final AI response and track token usage
-            if (finalResponse.content.trim()) {
+            if (finalResponse && finalResponse.content && finalResponse.content.toString().trim()) {
               try {
                 await self.saveMessage({
                   conversationId,

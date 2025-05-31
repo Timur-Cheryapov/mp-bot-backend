@@ -54,7 +54,7 @@ export function convertMessageToUi(message: Message): MessageUi {
   return {
     role: message.role,
     content: message.content,
-    status: 'success',
+    status: message.status || 'success',
     timestamp: message.created_at,
   };
 }

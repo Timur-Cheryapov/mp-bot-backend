@@ -4,6 +4,13 @@ import axios from 'axios';
 import logger from '../utils/logger';
 import { apiKeysService } from './apiKeys';
 
+export const wildberriesToolsMessages = {
+  wildberries_seller_products: {
+    success: "Fetch seller's Wildberries product cards.",
+    pending: "Fetching seller's Wildberries product cards..."
+  }
+}
+
 /**
  * Zod schema for Wildberries seller products tool parameters
  */
