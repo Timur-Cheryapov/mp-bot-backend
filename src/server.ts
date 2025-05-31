@@ -93,7 +93,9 @@ app.get('/api/joke', asyncHandler(async (req, res) => {
   const systemPrompt = 'You are a helpful assistant who tells programming jokes.';
   const userMessage = `Tell me a joke about ${req.query.language || 'TypeScript'}.`;
   
-  const joke = await langchainService.generateChatResponse(systemPrompt, userMessage, undefined, undefined, req.query.stream === 'true');
+  const joke = await langchainService.generateChatResponse(systemPrompt, userMessage, {
+    stream: req.query.stream === 'true'
+  });
   
   res.json({ success: true, message: joke });
 }));

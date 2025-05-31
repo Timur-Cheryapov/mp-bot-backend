@@ -139,11 +139,12 @@ export async function generateAndSaveResponse(
       const response = await langchainService.generateConversationResponse(
         systemPrompt,
         history,
-        undefined,
-        conversationId,
-        userId,
-        true,
-        true // includeWildberriesTools
+        {
+          conversationId,
+          userId,
+          stream: true,
+          includeWildberriesTools: true
+        }
       );
       
       return {
@@ -155,11 +156,12 @@ export async function generateAndSaveResponse(
       const response = await langchainService.generateConversationResponse(
         systemPrompt,
         history,
-        undefined,
-        conversationId,
-        userId,
-        false,
-        true // includeWildberriesTools
+        {
+          conversationId,
+          userId,
+          stream: false,
+          includeWildberriesTools: true
+        }
       );
       
       // Save assistant message

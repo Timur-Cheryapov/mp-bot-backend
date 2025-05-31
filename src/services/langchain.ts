@@ -202,18 +202,26 @@ Focus on being helpful for marketplace sellers and provide actionable business i
    * Generate a chat completion with basic message types
    * @param systemPrompt The system instructions
    * @param userMessage The user's message
-   * @param model Optional model name
-   * @param userId The user ID for usage tracking
+   * @param options Configuration options for the chat
    * @returns The AI's response
    */
   public async generateChatResponse(
     systemPrompt: string,
     userMessage: string,
-    modelName: string = MODEL_CONFIGS.GPT4O_MINI,
-    userId?: string,
-    stream?: boolean,
-    includeWildberriesTools?: boolean
+    options: {
+      modelName?: string;
+      userId?: string;
+      stream?: boolean;
+      includeWildberriesTools?: boolean;
+    } = {}
   ): Promise<string> {
+    const {
+      modelName = MODEL_CONFIGS.GPT4O_MINI,
+      userId,
+      stream = false,
+      includeWildberriesTools = false
+    } = options;
+
     try {
       // Check if user has reached their token limit
       if (userId) {
@@ -274,20 +282,28 @@ Focus on being helpful for marketplace sellers and provide actionable business i
    * Generate a chat completion with conversation history
    * @param systemPrompt The system instructions
    * @param messages Array of conversation messages (role and content)
-   * @param model Optional model name
-   * @param userId The user ID for usage tracking
-   * @param conversationId The conversation ID for saving messages during streaming
+   * @param options Configuration options for the conversation
    * @returns The AI's response
    */
   public async generateConversationResponse(
     systemPrompt: string,
     messages: Array<{role: string, content: string, tool_call_id?: string, tool_name?: string, tool_calls?: ToolCall[]}>,
-    modelName: string = MODEL_CONFIGS.GPT4O_MINI,
-    conversationId: string,
-    userId?: string,
-    stream?: boolean,
-    includeWildberriesTools: boolean = true
+    options: {
+      modelName?: string;
+      conversationId: string;
+      userId?: string;
+      stream?: boolean;
+      includeWildberriesTools?: boolean;
+    }
   ): Promise<string | Response> {
+    const {
+      modelName = MODEL_CONFIGS.GPT4O_MINI,
+      conversationId,
+      userId,
+      stream = false,
+      includeWildberriesTools = true
+    } = options;
+
     try {
       // Check if user has reached their token limit
       if (userId) {
@@ -436,14 +452,12 @@ Focus on being helpful for marketplace sellers and provide actionable business i
           // Step 2: Save the initial AI response and track token usage
           if (initialResponse) {
             try {
-              await self.saveMessage(
-                conversationId, 
-                initialResponse.content ? initialResponse.content.toString() : 'Processing...', 
-                'assistant',
-                undefined, // metadata
-                undefined, // status
-                initialResponse.tool_calls.length > 0 ? initialResponse.tool_calls : undefined // tool_calls for assistant message
-              );
+              await self.saveMessage({
+                conversationId,
+                content: initialResponse.content ? initialResponse.content.toString() : 'Processing...',
+                role: 'assistant',
+                toolCalls: initialResponse.tool_calls.length > 0 ? initialResponse.tool_calls : undefined
+              });
               logger.info('Saved initial AI response to database');
               
               // Track token usage for initial response
@@ -497,16 +511,14 @@ Focus on being helpful for marketplace sellers and provide actionable business i
                   });
                 }
                 
-                await self.saveMessage(
+                await self.saveMessage({
                   conversationId,
-                  messageContent,
-                  'tool',
-                  undefined, // metadata
-                  messageStatus, // status based on tool result
-                  undefined, // tool_calls (only for assistant messages)
-                  toolResult.tool_call_id, // tool_call_id
-                  initialResponse.tool_calls.find((tc: any) => tc.id === toolResult.tool_call_id)?.name // tool_name
-                );
+                  content: messageContent,
+                  role: 'tool',
+                  status: messageStatus,
+                  toolCallId: toolResult.tool_call_id,
+                  toolName: initialResponse.tool_calls.find((tc: any) => tc.id === toolResult.tool_call_id)?.name
+                });
                 logger.info(`Saved tool message to database: ${toolResult.tool_call_id} (status: ${messageStatus})`);
               } catch (saveError) {
                 logger.error('Failed to save tool message:', saveError);
@@ -545,7 +557,11 @@ Focus on being helpful for marketplace sellers and provide actionable business i
             // Step 7: Save the final AI response and track token usage
             if (finalResponse.content.trim()) {
               try {
-                await self.saveMessage(conversationId, finalResponse.content.toString(), 'assistant');
+                await self.saveMessage({
+                  conversationId,
+                  content: finalResponse.content.toString(),
+                  role: 'assistant'
+                });
                 logger.info('Saved final AI response to database');
                 
                 // Track token usage for final response
@@ -719,18 +735,27 @@ Focus on being helpful for marketplace sellers and provide actionable business i
     );
   }
 
-  private async saveMessage(
-    conversationId: string, 
-    content: string, 
-    role: 'user' | 'assistant' | 'tool', 
-    metadata?: Record<string, any>, 
-    status: 'pending' | 'success' | 'error' = 'success',
-    toolCalls?: any[],
-    toolCallId?: string,
-    toolName?: string
-  ): Promise<void> {
+  private async saveMessage(options: {
+    conversationId: string;
+    content: string;
+    role: 'user' | 'assistant' | 'tool';
+    metadata?: Record<string, any>;
+    status?: 'pending' | 'success' | 'error';
+    toolCalls?: any[];
+    toolCallId?: string;
+    toolName?: string;
+  }): Promise<void> {
     const { createMessage } = await import('./database');
-    await createMessage(conversationId, content, role, metadata, status, toolCalls, toolCallId, toolName);
+    await createMessage(
+      options.conversationId,
+      options.content,
+      options.role,
+      options.metadata,
+      options.status || 'success',
+      options.toolCalls,
+      options.toolCallId,
+      options.toolName
+    );
   }
 }
 
