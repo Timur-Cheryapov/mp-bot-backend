@@ -14,7 +14,7 @@ import {
 import logger from './utils/logger';
 import { BadRequestError } from './utils/errors';
 import apiRoutes from './routes';
-import { getLangChainService } from './services/langchain-legacy';
+import { getLangChainService } from './services/langchain';
 
 // Load environment variables
 dotenv.config();

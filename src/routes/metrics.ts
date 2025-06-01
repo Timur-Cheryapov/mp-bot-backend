@@ -1,5 +1,5 @@
 import express, { Request, Response } from 'express';
-import { getLangChainService } from '../services/langchain-legacy';
+import { getLangChainService } from '../services/langchain';
 import { asyncHandler, authenticate } from '../middleware';
 
 const router = express.Router();
