@@ -67,4 +67,20 @@ export function extractTokenUsage(
     totalCost,
     isEstimated
   };
+}
+
+export function extractTokenUsageFromMetadata(
+  usageMetadata: any,
+  modelName: string
+): TokenUsageResult {
+  const inputTokens = usageMetadata.input_tokens || 0;
+  const outputTokens = usageMetadata.output_tokens || 0;
+  const totalCost = calculateTokenCost(inputTokens, outputTokens, modelName);
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalCost,
+    isEstimated: false // LangGraph provides actual usage metadata
+  };
 } 

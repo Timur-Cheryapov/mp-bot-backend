@@ -23,18 +23,12 @@ export class ApiKeysService {
 
   constructor() {
     this.supabase = getSupabaseClient();
-    this.ENCRYPTION_KEY = process.env.API_KEYS_ENCRYPTION_KEY || this.generateDefaultKey();
+    this.ENCRYPTION_KEY = process.env.API_KEYS_ENCRYPTION_KEY || '';
     
-    if (!process.env.API_KEYS_ENCRYPTION_KEY) {
-      logger.warn('API_KEYS_ENCRYPTION_KEY not set in environment variables. Using default key - NOT SECURE FOR PRODUCTION!');
+    if (!this.ENCRYPTION_KEY) {
+      logger.error('API_KEYS_ENCRYPTION_KEY not set in environment variables');
+      throw new Error('API_KEYS_ENCRYPTION_KEY not set in environment variables');
     }
-  }
-
-  /**
-   * Generate a default encryption key (NOT SECURE FOR PRODUCTION)
-   */
-  private generateDefaultKey(): string {
-    return crypto.randomBytes(32).toString('hex');
   }
 
   /**

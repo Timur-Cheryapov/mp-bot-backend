@@ -1,5 +1,5 @@
 import express, { Request, Response } from 'express';
-import { getLangChainService } from '../services/langchain';
+import { getLangChainService } from '../services/langchain-legacy';
 import { asyncHandler, authenticate } from '../middleware';
 import logger from '../utils/logger';
 import * as conversationService from '../services/conversationService';

@@ -1,5 +1,5 @@
 import dotenv from 'dotenv';
-import { getLangChainService } from '../../services/langchain';
+import { getLangChainService } from '../../services/langchain-legacy';
 import { SIMPLE_SYSTEM_PROMPT, WILDBERRIES_SYSTEM_PROMPT } from '../../utils/messageUtils';
 
 // Load environment variables before tests
