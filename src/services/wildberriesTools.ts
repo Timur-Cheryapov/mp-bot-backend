@@ -78,7 +78,7 @@ export function createWildberriesSellerProductsTool(userId: string) {
 
         // Make POST request to Wildberries Content API
         const response = await axios.post(
-          'https://content-api.wildberries.ru/content/v2/get/cards/list',
+          'https://content-api-sandbox.wildberries.ru/content/v2/get/cards/list',
           requestBody,
           {
             headers: {
