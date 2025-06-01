@@ -9,7 +9,7 @@ export const FEATURE_FLAGS = {
   // LangGraph migration flags
   USE_LANGGRAPH_CHAT: USE_LANGGRAPH, // Simple chat endpoints
   USE_LANGGRAPH_CONVERSATION: USE_LANGGRAPH, // Conversation endpoints (non-streaming)
-  USE_LANGGRAPH_STREAMING: false, // Streaming endpoints (not implemented yet)
+  USE_LANGGRAPH_STREAMING: true, // Streaming endpoints
   
   // Detailed feature flags for gradual rollout
   USE_LANGGRAPH_NON_STREAMING_ONLY: USE_LANGGRAPH, // Only non-streaming endpoints

@@ -42,7 +42,7 @@ class UnifiedLangChainService {
       // LangGraph service doesn't expose createChatModel, so fallback to legacy
       logger.debug('Using legacy service for createChatModel (LangGraph doesn\'t expose this method)');
       return this.legacyService.createChatModel(params);
-    }
+        }
     return this.legacyService.createChatModel(params);
   }
 
@@ -75,12 +75,12 @@ class UnifiedLangChainService {
         logger.error('LangGraph service failed, falling back to legacy:', error);
         return await this.legacyService.generateChatResponse(systemPrompt, userMessage, options);
       }
-    } else {
+      } else {
       logger.debug('Using legacy service for chat response');
       return await this.legacyService.generateChatResponse(systemPrompt, userMessage, options);
     }
   }
-
+  
   /**
    * Generate conversation response - uses feature flag to choose implementation
    */
@@ -101,7 +101,7 @@ class UnifiedLangChainService {
           logger.debug('LangGraph streaming not implemented, falling back to legacy');
         } else {
           logger.error('LangGraph service failed, falling back to legacy:', error);
-        }
+      }
         return await this.legacyService.generateConversationResponse(systemPrompt, messages, options);
       }
     } else {

@@ -2,7 +2,7 @@ import { ChatOpenAI } from '@langchain/openai';
 import { OpenAIEmbeddings } from '@langchain/openai';
 import { StateGraph, MessagesAnnotation, END } from '@langchain/langgraph';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
-import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, SystemMessage, BaseMessage, ToolMessage, AIMessageChunk } from '@langchain/core/messages';
 import { MemorySaver } from '@langchain/langgraph';
 import { Annotation } from '@langchain/langgraph';
 
@@ -34,6 +34,7 @@ import {
   validateWildberriesToolsRequirements,
   validateApiKey
 } from '../utils/validationUtils';
+import { StreamController, createStreamResponse } from '../utils/streamingUtils';
 
 // Environment variables
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -330,8 +331,14 @@ class LangGraphService {
       validateWildberriesToolsRequirements(includeWildberriesTools, userId);
 
       if (stream) {
-        // For now, fallback to legacy for streaming until we implement LangGraph streaming
-        throw new Error('Streaming not implemented in LangGraph service yet');
+        return await this.handleStreamingResponse(
+          systemPrompt,
+          messages,
+          conversationId,
+          modelName,
+          userId,
+          includeWildberriesTools
+        );
       }
 
       // Create agent
@@ -396,6 +403,199 @@ class LangGraphService {
       logger.error(`Error generating conversation response: ${error instanceof Error ? error.message : String(error)}`);
       throw new Error(`Failed to generate response: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  private async handleStreamingResponse(
+    systemPrompt: string,
+    messages: BasicMessage[],
+    conversationId: string,
+    modelName: string,
+    userId?: string,
+    includeWildberriesTools: boolean = true
+  ): Promise<Response> {
+    const self = this; // Capture the class context
+    
+    const stream = new ReadableStream({
+      async start(controller) {
+        const streamController = new StreamController(controller);
+        
+        try {
+          logger.info('Starting LangGraph streaming...');
+          
+          // Create agent
+          const agent = self.createAgent(userId, includeWildberriesTools);
+          
+          // Convert messages to LangChain format
+          const langchainMessages = convertToLangChainMessages(systemPrompt, messages);
+
+          // Configure thread for conversation persistence
+          const config = {
+            configurable: { 
+              thread_id: conversationId 
+            },
+            streamMode: "messages" as const
+          };
+
+          // Initial state
+          const initialState = {
+            messages: langchainMessages,
+            conversationId,
+            userId: userId || '',
+            modelName,
+            includeWildberriesTools
+          };
+
+          // Track all messages that will be saved
+          let accumulatedAIResponse: AIMessageChunk | null = null;
+          const messagesToSave: any[] = [];
+          let hasToolCalls = false;
+          let toolExecutionSent = false;
+
+          // Stream the agent execution - await the promise first
+          const stream = await agent.stream(initialState, config);
+          
+          for await (const chunk of stream) {
+            // Process different types of messages in the stream
+            for (const [nodeName, nodeState] of Object.entries(chunk)) {
+              // When nodeName is '0', nodeState is a single message (AIMessageChunk or ToolMessage)
+              if (nodeName === '0' && nodeState) {
+                const message = nodeState as BaseMessage;
+                
+                if (message.constructor.name === 'AIMessageChunk') {
+                  const aiMessage = message as AIMessageChunk;
+                  
+                  // Check for tool calls
+                  if (aiMessage.tool_calls && aiMessage.tool_calls.length > 0) {
+                    hasToolCalls = true;
+                    if (!toolExecutionSent) {
+                      // Send tool execution notification
+                      const toolExecutionEvents = getToolExecutionEvents(aiMessage.tool_calls);
+                      streamController.sendToolExecution(toolExecutionEvents);
+                      toolExecutionSent = true;
+                    }
+                  }
+                  
+                  // Stream content if available
+                  if (aiMessage.content && aiMessage.content.toString().trim()) {
+                    streamController.sendChunk(aiMessage.content.toString());
+                  }
+                  
+                  // Accumulate the full AI response (similar to legacy approach)
+                  if (!accumulatedAIResponse) {
+                    accumulatedAIResponse = aiMessage;
+                  } else {
+                    // Concatenate chunks to build full response
+                    accumulatedAIResponse = accumulatedAIResponse.concat(aiMessage);
+                  }
+                } else if (message.constructor.name === 'ToolMessage') {
+                  // If there was an AIMessageChunk, we need to add it to the messagesToSave
+                  if (accumulatedAIResponse) {
+                    messagesToSave.push({
+                      type: 'ai',
+                      content: accumulatedAIResponse.content.toString(),
+                      toolCalls: accumulatedAIResponse.tool_calls?.length ? accumulatedAIResponse.tool_calls : undefined,
+                      usageMetadata: accumulatedAIResponse.usage_metadata
+                    });
+                    accumulatedAIResponse = null;
+                  }
+                  
+                  // Handle tool result messages
+                  const toolMessage = message as ToolMessage;
+                  let toolStatus: 'success' | 'error' = 'success';
+                  
+                  try {
+                    const result = JSON.parse(toolMessage.content.toString());
+                    toolStatus = result.success ? 'success' : 'error';
+                  } catch (e) {
+                    // If not JSON, assume it's a raw response
+                    toolStatus = 'success';
+                  }
+                  
+                  // Add to messages to save
+                  messagesToSave.push({
+                    type: 'tool',
+                    content: toolMessage.content,
+                    toolCallId: toolMessage.tool_call_id,
+                    toolName: toolMessage.name,
+                    status: toolStatus
+                  });
+                }
+              }
+            }
+          }
+
+          // Add the accumulated AI response to the messagesToSave if it exists
+          if (accumulatedAIResponse) {
+            messagesToSave.push({
+              type: 'ai',
+              content: accumulatedAIResponse.content.toString(),
+              toolCalls: accumulatedAIResponse.tool_calls?.length ? accumulatedAIResponse.tool_calls : undefined,
+              usageMetadata: accumulatedAIResponse.usage_metadata
+            });
+            accumulatedAIResponse = null;
+          }
+          
+          // Save all messages to database
+          if (conversationId && messagesToSave.length > 0) {
+            for (const messageData of messagesToSave) {
+              try {
+                if (messageData.type === 'ai') {
+                  await saveMessage({
+                    conversationId,
+                    content: messageData.content,
+                    role: 'assistant',
+                    toolCalls: messageData.toolCalls
+                  });
+                  
+                  // Track token usage if available
+                  if (messageData.usageMetadata && userId) {
+                    await self.trackTokenUsageFromMetadata(
+                      messageData.usageMetadata,
+                      modelName,
+                      userId
+                    );
+                  }
+                } else if (messageData.type === 'tool') {
+                  await saveMessage({
+                    conversationId,
+                    content: messageData.content,
+                    role: 'tool',
+                    status: messageData.status,
+                    toolCallId: messageData.toolCallId,
+                    toolName: messageData.toolName
+                  });
+                }
+              } catch (saveError) {
+                logger.error('Failed to save message during streaming:', saveError);
+              }
+            }
+          }
+          
+          // Send tool complete event if we had tool calls
+          if (hasToolCalls) {
+            const toolCompleteEvents = messagesToSave
+              .filter(m => m.type === 'tool')
+              .map(m => ({
+                message: m.content,
+                toolName: m.toolName,
+                status: m.status
+              }));
+            
+            if (toolCompleteEvents.length > 0) {
+              streamController.sendToolComplete(toolCompleteEvents);
+            }
+          }
+          
+          streamController.sendEnd();
+          
+        } catch (error) {
+          logger.error('Error in LangGraph streaming:', error);
+          streamController.sendError(error instanceof Error ? error.message : 'Unknown error occurred');
+        }
+      }
+    });
+
+    return createStreamResponse(stream);
   }
 
   private async trackTokenUsageFromMetadata(

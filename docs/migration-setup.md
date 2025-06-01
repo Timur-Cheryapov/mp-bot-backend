@@ -27,10 +27,12 @@ COMPARE_IMPLEMENTATIONS=false
 
 **Status**: Ready for testing non-streaming endpoints with feature flags
 
-### Phase 2: Streaming Implementation (Next)
-- [ ] Implement LangGraph streaming using `streamMode: "messages"`
-- [ ] Test streaming with tool calls
-- [ ] Migrate streaming endpoints
+### Phase 2: Streaming Implementation ✅ COMPLETED
+- ✅ Implement LangGraph streaming using `streamMode: "messages"`
+- ✅ Test streaming with tool calls
+- ✅ Migrate streaming endpoints
+
+**Status**: LangGraph streaming implementation completed with full tool call support
 
 ### Phase 3: Full Migration (Future)
 - [ ] Test all endpoints thoroughly
@@ -49,9 +51,14 @@ COMPARE_IMPLEMENTATIONS=false
    USE_LANGGRAPH=true npm run dev
    ```
 
-3. **Enable Debug Logging** (in development):
+3. **Test LangGraph Streaming**:
    ```bash
-   NODE_ENV=development USE_LANGGRAPH=true npm run dev
+   USE_LANGGRAPH=true USE_LANGGRAPH_STREAMING=true npm run dev
+   ```
+
+4. **Enable Debug Logging** (in development):
+   ```bash
+   NODE_ENV=development USE_LANGGRAPH=true USE_LANGGRAPH_STREAMING=true npm run dev
    ```
 
 ## Quick Feature Flag Test
@@ -78,15 +85,18 @@ console.log("Response:", response);
 
 ### ✅ Implemented in LangGraph
 - Non-streaming conversation responses
+- **Streaming conversation responses with real-time chunks**
 - Tool calling with Wildberries tools
+- **Streaming tool execution with progress events**
 - Token usage tracking with built-in usage metadata
 - Message persistence to database
 - Error handling with automatic fallback to legacy
 - ReAct agent pattern with StateGraph
+- **Server-sent events streaming with chunk/tool/error events**
 - Proper TypeScript annotations and state management
 
 ### ❌ Not Yet Implemented
-- Streaming responses (falls back to legacy automatically)
+- ~~Streaming responses (falls back to legacy automatically)~~ ✅ **COMPLETED**
 - Direct model creation API (falls back to legacy)
 - Advanced configuration options
 
