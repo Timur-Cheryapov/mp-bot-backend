@@ -84,3 +84,14 @@ export function extractTokenUsageFromMetadata(
     isEstimated: false // LangGraph provides actual usage metadata
   };
 } 
+
+/**
+ * Calculate approximate token count (rough estimate)
+ * @param text Input text
+ * @returns Estimated token count
+ */
+export function estimateTokenCount(text: string): number {
+  // A rough approximation: GPT models use ~4 chars per token on average
+  // This is just an estimate and will not be exact
+  return Math.ceil(text.length / 4);
+}

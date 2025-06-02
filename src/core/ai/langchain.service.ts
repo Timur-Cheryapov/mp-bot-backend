@@ -8,7 +8,6 @@ import { Annotation } from '@langchain/langgraph';
 import { BasicMessage } from '../../shared/types/message.types';
 
 import logger from '../../shared/utils/logger';
-import { formatLangchainMessagesToBasic } from './langchain.utils';
 import { upsertDailyUsage } from '../plans/daily-usage.service';
 import { DailyUsage } from '../../infrastructure/database/supabase.client';
 
@@ -33,6 +32,8 @@ import { validateUserUsageLimit } from '../plans/validation.utils';
 import { validateWildberriesToolsRequirements } from '../tools/validation.utils';
 import { validateApiKey } from '../../shared/utils/validation.utils';
 import { StreamController, createStreamResponse } from '../../shared/utils/streaming.utils';
+import { MODEL_CONFIGS } from '../../config/langchain.config';
+import { ChatOptions, ConversationOptions, ChatModelParams, EmbeddingModelParams, TokenMetrics } from './langchain.types';
 
 // Environment variables
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -40,45 +41,6 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 // Error messages
 const ERROR_INITIALIZATION = 'Failed to initialize LangChain service';
 const ERROR_MODEL_CREATION = 'Failed to create model instance';
-
-// Model configurations
-export const MODEL_CONFIGS = {
-  GPT4_1: 'gpt-4.1',
-  GPT4_1_MINI: 'gpt-4.1-mini',
-  TEXT_EMBEDDING_3_SMALL: 'text-embedding-3-small',
-  GPT4O_MINI: 'gpt-4o-mini'
-};
-
-// Configuration types (kept same for compatibility)
-export type ChatModelParams = {
-  temperature?: number;
-  maxTokens?: number;
-  modelName?: string;
-  includeWildberriesTools?: boolean;
-  userId?: string;
-};
-
-export type EmbeddingModelParams = {
-  modelName?: string;
-  stripNewLines?: boolean;
-};
-
-export type ChatOptions = {
-  modelName?: string;
-  userId?: string;
-  stream?: boolean;
-  includeWildberriesTools?: boolean;
-};
-
-export type ConversationOptions = {
-  modelName?: string;
-  conversationId: string;
-  userId?: string;
-  stream?: boolean;
-  includeWildberriesTools?: boolean;
-};
-
-type TokenMetrics = Omit<DailyUsage, 'id' | 'created_at' | 'updated_at'>;
 
 // LangGraph Agent State
 const AgentState = Annotation.Root({
