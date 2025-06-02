@@ -10,11 +10,11 @@ import {
   notFoundHandler,
   asyncHandler,
   handleCsrfError,
-} from './middleware';
-import logger from './utils/logger';
-import { BadRequestError } from './utils/errors';
-import apiRoutes from './routes';
-import { getLangChainService } from './services/langchain';
+} from './shared/middleware';
+import logger from './shared/utils/logger';
+import { BadRequestError } from './shared/utils/errors';
+import apiRoutes from './api';
+import { getLangChainService } from './core/ai/langchain.service';
 
 // Load environment variables
 dotenv.config();

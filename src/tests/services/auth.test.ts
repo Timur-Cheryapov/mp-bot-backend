@@ -1,4 +1,4 @@
-import { authService, SignupData, LoginData } from '../../services/auth';
+import { authService, SignupData, LoginData } from '../../core/auth/auth.service';
 
 // Mock the Supabase client
 jest.mock('../../services/supabase', () => {

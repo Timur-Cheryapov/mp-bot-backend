@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import { authController } from '../../controllers/auth.controller';
-import { authenticate, trackLoginAttempts } from '../../middleware/auth';
+import { authController } from '../../api/auth/auth.controller';
+import { authenticate, trackLoginAttempts } from '../../shared/middleware/auth.middleware';
 
 // Mock auth controller
 jest.mock('../../controllers/auth.controller', () => ({

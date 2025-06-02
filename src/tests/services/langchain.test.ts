@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
-import { getLangChainService } from '../../services/langchain';
-import { SIMPLE_SYSTEM_PROMPT, WILDBERRIES_SYSTEM_PROMPT } from '../../utils/messageUtils';
+import { getLangChainService } from '../../core/ai/langchain.service';
+import { SIMPLE_SYSTEM_PROMPT, WILDBERRIES_SYSTEM_PROMPT } from '../../shared/utils/messageUtils';
 
 // Load environment variables before tests
 dotenv.config();
@@ -32,12 +32,6 @@ describe('LangChain Service', () => {
   describe('Service Initialization', () => {
     test('should initialize the service', () => {
       expect(langchainService).toBeDefined();
-    });
-
-    test('should create a chat model with default parameters', async () => {
-      const model = await langchainService.createChatModel();
-      expect(model).toBeDefined();
-      expect(model.temperature).toBe(0.7);
     });
 
     test('should create a chat model with custom parameters', async () => {

@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
-import { authenticate, requireAdmin, trackLoginAttempts } from '../../middleware/auth';
-import { UnauthorizedError, ForbiddenError } from '../../utils/errors';
-import { getSupabaseClient } from '../../services/supabase';
+import { authenticate, requireAdmin, trackLoginAttempts } from '../../shared/middleware/auth.middleware';
+import { UnauthorizedError, ForbiddenError } from '../../shared/utils/errors';
+import { getSupabaseClient } from '../../infrastructure/database/supabase.client';
 
 // Mock Supabase client
 jest.mock('../../services/supabase', () => ({
