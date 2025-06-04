@@ -1,4 +1,4 @@
-import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, SystemMessage, ToolMessage, BaseMessage } from '@langchain/core/messages';
 import { BasicMessage } from '../../shared/types/message.types';
 
 export interface SaveMessageOptions {
@@ -15,7 +15,7 @@ export interface SaveMessageOptions {
 export function convertToLangChainMessages(
   systemPrompt: string,
   messages: BasicMessage[]
-): any[] {
+): BaseMessage[] {
   return [
     new SystemMessage(systemPrompt),
     ...messages.map(msg => {

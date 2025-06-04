@@ -19,8 +19,7 @@ import {
 } from './token-calculator';
 import {
   convertToLangChainMessages,
-  saveMessage,
-  SaveMessageOptions
+  saveMessage
 } from '../conversations/message.utils';
 import {
   executeTools,
@@ -34,6 +33,7 @@ import { validateApiKey } from '../../shared/utils/validation.utils';
 import { StreamController, createStreamResponse } from '../../shared/utils/streaming.utils';
 import { MODEL_CONFIGS } from '../../config/langchain.config';
 import { ChatOptions, ConversationOptions, ChatModelParams, EmbeddingModelParams, TokenMetrics } from './langchain.types';
+import { processMessages, buildCallState } from './langchain.utils';
 
 // Environment variables
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -159,7 +159,9 @@ class LangChainService {
     // Define agent node
     const callModel = async (state: typeof AgentState.State) => {
       try {
+        console.log('state.messages', state.messages);
         const response = await boundModel.invoke(state.messages);
+        console.log('response', response);
         
         // Track token usage if we have userId
         if (state.userId && response.usage_metadata) {
@@ -304,9 +306,6 @@ class LangChainService {
       // Create agent
       const agent = this.createAgent(userId, includeWildberriesTools);
       
-      // Convert messages to LangChain format
-      const langchainMessages = convertToLangChainMessages(systemPrompt, messages);
-
       // Configure thread for conversation persistence
       const config = {
         configurable: { 
@@ -314,16 +313,23 @@ class LangChainService {
         }
       };
 
-      // Invoke agent with state
-      const initialState = {
-        messages: langchainMessages,
+      const state = await agent.getState(config);
+      const stateMessages = state.values.messages;
+      const processed = processMessages(systemPrompt, messages, stateMessages);
+
+      const callState = buildCallState(
+        processed,
         conversationId,
-        userId: userId || '',
+        userId,
         modelName,
         includeWildberriesTools
-      };
+      );
 
-      const result = await agent.invoke(initialState, config);
+      // Invoke agent with state - only pass the messages that changed
+      const result = await agent.invoke(
+        callState,
+        config
+      );
       
       // Get the final AI message
       const finalMessage = result.messages[result.messages.length - 1] as AIMessage;
@@ -332,7 +338,7 @@ class LangChainService {
       // Save messages to database if we have a conversationId
       if (conversationId) {
         // Save all new messages from this interaction
-        const messagesToSave = result.messages.slice(langchainMessages.length);
+        const messagesToSave = result.messages.slice(messages.length);
         
         for (const message of messagesToSave) {
           if (message.constructor.name === 'AIMessage') {
@@ -385,9 +391,6 @@ class LangChainService {
           // Create agent
           const agent = self.createAgent(userId, includeWildberriesTools);
           
-          // Convert messages to LangChain format
-          const langchainMessages = convertToLangChainMessages(systemPrompt, messages);
-
           // Configure thread for conversation persistence
           const config = {
             configurable: { 
@@ -396,14 +399,17 @@ class LangChainService {
             streamMode: "messages" as const
           };
 
-          // Initial state
-          const initialState = {
-            messages: langchainMessages,
+          const state = await agent.getState(config);
+          const stateMessages = state.values.messages;
+          const processed = processMessages(systemPrompt, messages, stateMessages);
+
+          const callState = buildCallState(
+            processed,
             conversationId,
-            userId: userId || '',
+            userId,
             modelName,
             includeWildberriesTools
-          };
+          );
 
           // Track all messages that will be saved
           let accumulatedAIResponse: AIMessageChunk | null = null;
@@ -411,8 +417,11 @@ class LangChainService {
           let hasToolCalls = false;
           let toolExecutionSent = false;
 
-          // Stream the agent execution - await the promise first
-          const stream = await agent.stream(initialState, config);
+          // Initial state - only pass the messages that changed
+          const stream = await agent.stream(
+            callState,
+            config
+          );
           
           for await (const chunk of stream) {
             // Process different types of messages in the stream
@@ -507,6 +516,9 @@ class LangChainService {
                     toolCalls: messageData.toolCalls
                   });
                   
+                  // TODO: Experiment - Remove this token tracking to avoid double counting
+                  // Token tracking should already happen in the callModel node
+                  /*
                   // Track token usage if available
                   if (messageData.usageMetadata && userId) {
                     await self.trackTokenUsageFromMetadata(
@@ -515,6 +527,7 @@ class LangChainService {
                       userId
                     );
                   }
+                  */
                 } else if (messageData.type === 'tool') {
                   await saveMessage({
                     conversationId,

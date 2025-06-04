@@ -79,9 +79,9 @@ router.post(['/', '/:conversationId'], asyncHandler(async (req: Request, res: Re
       message, 
       conversationId: conversationIdFromBody = null,
       title = 'New Conversation',
-      systemPrompt = WILDBERRIES_SYSTEM_PROMPT,
       stream = false
     } = req.body;
+    const systemPrompt = WILDBERRIES_SYSTEM_PROMPT;
     
     // Validate required fields
     const validationError = validateRequiredFields(req.body, ['message']);
