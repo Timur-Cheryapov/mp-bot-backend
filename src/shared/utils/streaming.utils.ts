@@ -48,8 +48,8 @@ export class StreamController {
     this.sendEvent('tool_execution', toolEvents);
   }
 
-  sendToolComplete(toolEvents: Array<{message: string, toolName: string, status: 'success' | 'error'}>): void {
-    this.sendEvent('tool_complete', toolEvents);
+  sendToolComplete(toolEvent: {message: string, toolName: string, status: 'success' | 'error'}): void {
+    this.sendEvent('tool_complete', toolEvent);
   }
 
   sendError(error: string): void {

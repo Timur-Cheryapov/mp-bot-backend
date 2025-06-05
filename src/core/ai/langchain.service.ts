@@ -387,8 +387,6 @@ class LangChainService {
           // Track all messages that will be saved
           let accumulatedAIResponse: AIMessageChunk | null = null;
           const messagesToSave: any[] = [];
-          let hasToolCalls = false;
-          let toolExecutionSent = false;
 
           // Stream without persistence config
           const stream = await agent.stream(callState, {
@@ -407,13 +405,9 @@ class LangChainService {
                   
                   // Check for tool calls
                   if (aiMessage.tool_calls && aiMessage.tool_calls.length > 0) {
-                    hasToolCalls = true;
-                    if (!toolExecutionSent) {
-                      // Send tool execution notification
-                      const toolExecutionEvents = getToolExecutionEvents(aiMessage.tool_calls);
-                      streamController.sendToolExecution(toolExecutionEvents);
-                      toolExecutionSent = true;
-                    }
+                    // Send tool execution notification
+                    const toolExecutionEvents = getToolExecutionEvents(aiMessage.tool_calls);
+                    streamController.sendToolExecution(toolExecutionEvents);
                   }
                   
                   // Stream content if available
@@ -450,6 +444,13 @@ class LangChainService {
                     // If not JSON, assume it's a raw response
                     toolStatus = 'success';
                   }
+
+                  // Send tool complete event
+                  streamController.sendToolComplete({
+                    message: toolMessage.content.toString(),
+                    toolName: toolMessage.name || '',
+                    status: toolStatus
+                  });
                   
                   // Add to messages to save
                   messagesToSave.push({
@@ -500,21 +501,6 @@ class LangChainService {
               } catch (saveError) {
                 logger.error('Failed to save message during streaming:', saveError);
               }
-            }
-          }
-          
-          // Send tool complete event if we had tool calls
-          if (hasToolCalls) {
-            const toolCompleteEvents = messagesToSave
-              .filter(m => m.type === 'tool')
-              .map(m => ({
-                message: m.content,
-                toolName: m.toolName,
-                status: m.status
-              }));
-            
-            if (toolCompleteEvents.length > 0) {
-              streamController.sendToolComplete(toolCompleteEvents);
             }
           }
           
