@@ -274,7 +274,7 @@ class LangChainService {
     systemPrompt: string,
     messages: BasicMessage[],
     options: ConversationOptions
-  ): Promise<string | Response> {
+  ): Promise<BaseMessage[] | Response> {
     const {
       modelName = MODEL_CONFIGS.GPT4O_MINI,
       conversationId,
@@ -315,16 +315,12 @@ class LangChainService {
       // Invoke agent without persistence config
       const result = await agent.invoke(callState);
       
-      // Get the final AI message
-      const finalMessage = result.messages[result.messages.length - 1] as AIMessage;
-      const outputText = finalMessage.content.toString();
+      // Get messages from agent
+      const resultMessages = result.messages.slice(langchainMessages.length);
 
       // Save messages to database if we have a conversationId
       if (conversationId) {
-        // Save all new messages from this interaction
-        const messagesToSave = result.messages.slice(langchainMessages.length);
-        
-        for (const message of messagesToSave) {
+        for (const message of resultMessages) {
           if (message.constructor.name === 'AIMessage') {
             const aiMessage = message as AIMessage;
             await saveMessage({
@@ -348,7 +344,7 @@ class LangChainService {
         }
       }
 
-      return outputText;
+      return resultMessages;
     } catch (error) {
       logger.error(`Error generating conversation response: ${error instanceof Error ? error.message : String(error)}`);
       throw new Error(`Failed to generate response: ${error instanceof Error ? error.message : String(error)}`);

@@ -4,6 +4,7 @@ import { asyncHandler, authenticate } from '../../shared/middleware';
 import logger from '../../shared/utils/logger';
 import * as conversationService from '../../core/conversations/conversations.service';
 import { formatMessagesToBasic } from '../../core/ai/langchain.utils';
+import { BaseMessage } from '@langchain/core/messages';
 
 const router = express.Router();
 const langchainService = getLangChainService();
@@ -59,10 +60,10 @@ router.post('/conversation', authenticate, asyncHandler(async (req: Request, res
         {
           conversationId: conversation.id
         }
-      );
+      ) as BaseMessage[];
       
       // Save assistant response to database
-      await conversationService.saveMessage(conversation.id, response.toString(), 'assistant');
+      await conversationService.saveMessage(conversation.id, response[0].content.toString(), 'assistant');
       
       // Add the assistant response to the history
       updatedHistory.push({ role: 'assistant', content: response });

@@ -2,6 +2,7 @@ import logger from '../../shared/utils/logger';
 import * as databaseService from '../../infrastructure/database/database.service';
 import { getLangChainService } from '../ai/langchain.service';
 import { Conversation, Message } from '../../infrastructure/database/supabase.client';
+import { BaseMessage } from '@langchain/core/messages';
 
 const langchainService = getLangChainService();
 
@@ -95,7 +96,7 @@ export async function generateAndSaveResponse(
   userMessage: string,
   systemPrompt: string,
   stream: boolean
-): Promise<{ response: string | Response; conversationId: string }> {
+): Promise<{ response: BaseMessage[] | Response; conversationId: string }> {
   try {
     // Save user message
     await databaseService.createMessage(
@@ -142,10 +143,10 @@ export async function generateAndSaveResponse(
         stream: stream,
         includeWildberriesTools: true
       }
-    );
+    ) as BaseMessage[];
     
     return {
-      response: stream ? response : response.toString(),
+      response,
       conversationId
     };
   } catch (error) {
