@@ -24,7 +24,8 @@ import {
   executeTools,
   getToolExecutionEvents,
   parseToolExecutionResult,
-  createToolsMap
+  createToolsMap,
+  LISTING_TOOLS_NAME
 } from '../tools/tool-execution.utils';
 import { validateUserUsageLimit } from '../plans/validation.utils';
 import { validateWildberriesToolsRequirements } from '../tools/validation.utils';
@@ -130,8 +131,9 @@ class LangChainService {
     
     try {
       const toolsByName = createToolsMap(userId);
-      const wildberriesSellerTool = toolsByName['get_wildberries_seller_product_cards'];
-      return wildberriesSellerTool ? [wildberriesSellerTool] : [];
+      const listingTools = toolsByName[LISTING_TOOLS_NAME];
+      const tools = listingTools ? [...listingTools] : [];
+      return tools;
     } catch (toolError) {
       logger.warn('Failed to create Wildberries tools', {
         userId,
