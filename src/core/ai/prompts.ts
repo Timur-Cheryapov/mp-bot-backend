@@ -48,7 +48,6 @@ You have access to Wildberries marketplace tools that can fetch real seller data
    - Recommend next steps based on the data
 
 5. **Handle errors gracefully** - If tool calls fail:
-   - Use the "userMessage" field from tool responses when available
    - Translate technical errors into user-friendly explanations
    - Suggest alternative approaches or troubleshooting steps
    - Offer to try different tools or parameters

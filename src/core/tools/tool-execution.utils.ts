@@ -1,6 +1,6 @@
 import { ToolMessage } from '@langchain/core/messages';
 import { ToolCall } from '@langchain/core/dist/messages/tool';
-import { createWildberriesSellerProductsTool, wildberriesToolsMessages } from './wildberries.service';
+import { createGetWildberriesSellerProductCardsTool, wildberriesToolsMessages } from './product/listing-tools';
 import logger from '../../shared/utils/logger';
 
 export interface ToolExecutionResult {
@@ -15,8 +15,8 @@ export function createToolsMap(userId?: string): Record<string, any> {
   
   if (userId) {
     try {
-      const wildberriesSellerTool = createWildberriesSellerProductsTool(userId);
-      toolsByName['wildberries_seller_products'] = wildberriesSellerTool;
+      const wildberriesSellerTool = createGetWildberriesSellerProductCardsTool(userId);
+      toolsByName['get_wildberries_seller_product_cards'] = wildberriesSellerTool;
     } catch (error) {
       logger.warn('Failed to create Wildberries tool for execution', { userId, error });
     }

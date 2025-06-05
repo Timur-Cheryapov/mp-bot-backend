@@ -130,7 +130,7 @@ class LangChainService {
     
     try {
       const toolsByName = createToolsMap(userId);
-      const wildberriesSellerTool = toolsByName['wildberries_seller_products'];
+      const wildberriesSellerTool = toolsByName['get_wildberries_seller_product_cards'];
       return wildberriesSellerTool ? [wildberriesSellerTool] : [];
     } catch (toolError) {
       logger.warn('Failed to create Wildberries tools', {
