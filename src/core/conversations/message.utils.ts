@@ -29,6 +29,25 @@ export function convertToLangChainMessages(
   ];
 }
 
+/**
+ * Determines if a tool message content indicates an error based on content analysis
+ */
+export function determineToolMessageStatus(content: string): 'success' | 'error' {
+  try {
+    const result = JSON.parse(content);
+    return result.success ? 'success' : 'error';
+  } catch (e) {
+    // If JSON parsing fails, check if it's an error
+    const isError = content.toLowerCase().includes('error') || 
+                           content.includes('did not match expected schema') ||
+                           content.includes('validation') ||
+                           content.includes('failed') ||
+                           content.includes('invalid');
+    
+    return isError ? 'error' : 'success';
+  }
+}
+
 export async function saveMessage(options: SaveMessageOptions): Promise<void> {
   const { createMessage } = await import('../../infrastructure/database/database.service');
   await createMessage(

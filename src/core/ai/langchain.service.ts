@@ -18,7 +18,8 @@ import {
 } from './token-calculator';
 import {
   convertToLangChainMessages,
-  saveMessage
+  saveMessage,
+  determineToolMessageStatus
 } from '../conversations/message.utils';
 import {
   executeTools,
@@ -327,13 +328,23 @@ class LangChainService {
               toolCalls: aiMessage.tool_calls?.length ? aiMessage.tool_calls : undefined
             });
           } else if (message.constructor.name === 'ToolMessage') {
-            const success = JSON.parse(message.content.toString()).success;
+            const content = message.content.toString();
+            const status = determineToolMessageStatus(content);
+            
+            if (status === 'error') {
+              logger.warn('Tool execution failed (non-streaming)', { 
+                toolCallId: (message as any).tool_call_id,
+                toolName: (message as any).name,
+                content: content
+              });
+            }
+            
             // Handle tool messages if any
             await saveMessage({
               conversationId,
-              content: message.content.toString(),
+              content: content,
               role: 'tool',
-              status: success ? 'success' : 'error',
+              status: status,
               toolCallId: (message as any).tool_call_id,
               toolName: (message as any).name
             });
@@ -430,14 +441,15 @@ class LangChainService {
                   
                   // Handle tool result messages
                   const toolMessage = message as ToolMessage;
-                  let toolStatus: 'success' | 'error' = 'success';
+                  const content = toolMessage.content.toString();
+                  const toolStatus = determineToolMessageStatus(content);
                   
-                  try {
-                    const result = JSON.parse(toolMessage.content.toString());
-                    toolStatus = result.success ? 'success' : 'error';
-                  } catch (e) {
-                    // If not JSON, assume it's a raw response
-                    toolStatus = 'success';
+                  if (toolStatus === 'error') {
+                    logger.warn('Tool execution failed', { 
+                      toolCallId: toolMessage.tool_call_id,
+                      toolName: toolMessage.name,
+                      content: content
+                    });
                   }
 
                   // Send tool complete event
