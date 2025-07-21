@@ -246,7 +246,7 @@ export const createMessage = async (
   content: string,
   role: 'user' | 'assistant' | 'tool',
   metadata?: Record<string, any>,
-  status: 'pending' | 'success' | 'error' = 'success',
+  status: 'pending' | 'success' | 'error' | 'aborted' = 'success',
   toolCalls?: ToolCall[],
   toolCallId?: string,
   toolName?: string

@@ -95,7 +95,8 @@ export async function generateAndSaveResponse(
   conversationId: string,
   userMessage: string,
   systemPrompt: string,
-  stream: boolean
+  stream: boolean,
+  abortSignal?: AbortSignal
 ): Promise<{ response: BaseMessage[] | Response; conversationId: string }> {
   try {
     // Save user message
@@ -141,7 +142,8 @@ export async function generateAndSaveResponse(
         conversationId,
         userId,
         stream: stream,
-        includeWildberriesTools: true
+        includeWildberriesTools: true,
+        abortSignal
       }
     ) as BaseMessage[];
     

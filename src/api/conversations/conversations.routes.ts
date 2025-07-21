@@ -83,6 +83,20 @@ router.post(['/', '/:conversationId'], asyncHandler(async (req: Request, res: Re
     } = req.body;
     const systemPrompt = WILDBERRIES_SYSTEM_PROMPT;
     
+    // Create AbortController to handle client disconnection
+    const abortController = new AbortController();
+    
+    // Listen for client disconnect
+    req.on('close', () => {
+      console.log('Client disconnected, aborting AI generation');
+      abortController.abort();
+    });
+    
+    req.on('error', () => {
+      console.log('Client connection error, aborting AI generation');
+      abortController.abort();
+    });
+    
     // Validate required fields
     const validationError = validateRequiredFields(req.body, ['message']);
     if (validationError) {
@@ -124,7 +138,8 @@ router.post(['/', '/:conversationId'], asyncHandler(async (req: Request, res: Re
       conversation.id,
       message,
       finalSystemPrompt,
-      stream
+      stream,
+      abortController.signal
     );
     
     // Handle streaming response

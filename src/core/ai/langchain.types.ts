@@ -27,6 +27,7 @@ export type ConversationOptions = {
   userId?: string;
   stream?: boolean;
   includeWildberriesTools?: boolean;
+  abortSignal?: AbortSignal;
 };
 
 export type TokenMetrics = Omit<DailyUsage, 'id' | 'created_at' | 'updated_at'>;

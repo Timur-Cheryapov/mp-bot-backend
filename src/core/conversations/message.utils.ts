@@ -6,7 +6,7 @@ export interface SaveMessageOptions {
   content: string;
   role: 'user' | 'assistant' | 'tool';
   metadata?: Record<string, any>;
-  status?: 'pending' | 'success' | 'error';
+  status?: 'pending' | 'success' | 'error' | 'aborted';
   toolCalls?: any[];
   toolCallId?: string;
   toolName?: string;

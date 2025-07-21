@@ -292,7 +292,8 @@ class LangChainService {
           conversationId,
           modelName,
           userId,
-          includeWildberriesTools
+          includeWildberriesTools,
+          options.abortSignal
         );
       }
 
@@ -365,13 +366,26 @@ class LangChainService {
     conversationId: string,
     modelName: string,
     userId?: string,
-    includeWildberriesTools: boolean = true
+    includeWildberriesTools: boolean = true,
+    abortSignal?: AbortSignal
   ): Promise<Response> {
     const self = this; // Capture the class context
     
     const stream = new ReadableStream({
       async start(controller) {
         const streamController = new StreamController(controller);
+        let wasAborted = false;
+        
+        // Listen for abort signal
+        const handleAbort = () => {
+          wasAborted = true;
+          logger.info('AI generation aborted by client');
+          streamController.sendError('Request aborted by client');
+        };
+        
+        if (abortSignal) {
+          abortSignal.addEventListener('abort', handleAbort);
+        }
         
         try {
           logger.info('Starting LangGraph streaming...');
@@ -395,11 +409,19 @@ class LangChainService {
           const messagesToSave: any[] = [];
 
           // Stream without persistence config
+          // Note: LangGraph doesn't support true cancellation, so this will continue running
+          // even after we stop processing chunks
           const stream = await agent.stream(callState, {
             streamMode: "messages" as const
           });
           
           for await (const chunk of stream) {
+            // Check for abort before processing each chunk
+            if (abortSignal?.aborted || wasAborted) {
+              logger.info('Stopping generation - client disconnected');
+              break;
+            }
+            
             // Process different types of messages in the stream
             for (const [nodeName, nodeState] of Object.entries(chunk)) {
               // When nodeName is '0', nodeState is a single message (AIMessageChunk or ToolMessage)
@@ -511,11 +533,18 @@ class LangChainService {
             }
           }
           
-          streamController.sendEnd();
+          if (!wasAborted) {
+            streamController.sendEnd();
+          }
           
         } catch (error) {
           logger.error('Error in LangGraph streaming:', error);
           streamController.sendError(error instanceof Error ? error.message : 'Unknown error occurred');
+        } finally {
+          // Clean up abort listener
+          if (abortSignal) {
+            abortSignal.removeEventListener('abort', handleAbort);
+          }
         }
       }
     });

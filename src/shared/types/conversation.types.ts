@@ -2,7 +2,7 @@
  * Type definitions for the conversation service
  * Defines all types used for conversation management
  */
-export type MessageStatus = 'pending' | 'success' | 'error';
+export type MessageStatus = 'pending' | 'success' | 'error' | 'aborted';
 
 /**
  * The role of a participant in a conversation

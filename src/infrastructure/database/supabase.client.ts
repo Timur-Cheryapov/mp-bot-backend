@@ -40,7 +40,7 @@ export type Message = {
   tool_calls?: ToolCall[]; // Array of tool calls for assistant messages
   tool_call_id?: string; // Reference to tool call ID for tool messages
   tool_name?: string; // Name of the tool for tool messages
-  status?: 'pending' | 'success' | 'error'; // Status for tool messages
+  status?: 'pending' | 'success' | 'error' | 'aborted'; // Status for tool messages
   metadata?: Record<string, any>;
 };
 
