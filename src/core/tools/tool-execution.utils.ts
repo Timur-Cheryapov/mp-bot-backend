@@ -1,6 +1,6 @@
 import { ToolMessage } from '@langchain/core/messages';
 import { ToolCall } from '@langchain/core/dist/messages/tool';
-import { createCreateWildberriesProductCardTool, createGetWildberriesSellerProductCardsTool, getWildberriesSubjectIdTool, wildberriesToolsMessages } from './product/listing-tools';
+import { createWildberriesProductCardTool, getWildberriesSellerProductCardsTool, getWildberriesSubjectIdTool, wildberriesToolsMessages } from './product/listing-tools';
 import logger from '../../shared/utils/logger';
 
 export interface ToolExecutionResult {
@@ -18,8 +18,8 @@ export function createToolsMap(userId?: string): Record<string, any> {
   if (userId) {
     try {
       const listingTools = [
-        createGetWildberriesSellerProductCardsTool(userId),
-        createCreateWildberriesProductCardTool(userId),
+        getWildberriesSellerProductCardsTool(userId),
+        createWildberriesProductCardTool(userId),
         getWildberriesSubjectIdTool(userId),
       ];
       toolsByName[LISTING_TOOLS_NAME] = listingTools;

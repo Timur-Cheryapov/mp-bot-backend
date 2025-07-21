@@ -131,7 +131,7 @@ class LangChainService {
     
     try {
       const toolsByName = createToolsMap(userId);
-      const listingTools = toolsByName[LISTING_TOOLS_NAME];
+      const listingTools = toolsByName[LISTING_TOOLS_NAME]; // Retrieve listing tools
       const tools = listingTools ? [...listingTools] : [];
       return tools;
     } catch (toolError) {
@@ -198,10 +198,7 @@ class LangChainService {
     if (toolNode && tools.length > 0) {
       workflow
         .addNode("tools", toolNode)
-        .addConditionalEdges("agent", shouldContinue, {
-          tools: "tools",
-          [END]: END
-        })
+        .addConditionalEdges("agent", shouldContinue)
         .addEdge("tools", "agent");
     } else {
       workflow.addEdge("agent", END);

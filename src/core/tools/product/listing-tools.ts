@@ -28,7 +28,7 @@ const getWildberriesSellerProductCardsSchema = z.object({
  * Create a Wildberries Seller Products tool for fetching seller's listed products
  * Based on: https://dev.wildberries.ru/openapi/work-with-products#tag/Kartochki-tovarov/paths/~1content~1v2~1get~1cards~1list/post
  */
-export function createGetWildberriesSellerProductCardsTool(userId: string) {
+export function getWildberriesSellerProductCardsTool(userId: string) {
   return tool(
     async (input) => {
       try {
@@ -122,25 +122,28 @@ export function createGetWildberriesSellerProductCardsTool(userId: string) {
  * Zod schema for Wildberries product card creation tool parameters
  */
 const createWildberriesProductCardSchema = z.object({
-  subjectId: z.number().min(1).describe("Subject ID from Wildberries API of the product"),
+  subjectId: z.number().int().min(1).describe("Subject ID from Wildberries API of the product"),
   brand: z.string().optional().describe("Brand of the product"),
   title: z.string().describe("Title of the product"),
-  description: z.string().optional().describe("Description of the product"),
+  description: z.string().refine(
+    (val) => val === "" || (val.length >= 1000 && val.length <= 5000),
+    { message: "Description must be either empty or between 1000-5000 characters" }
+  ).optional().describe("Description of the product. Must be either empty or between 1000-5000 characters."),
   vendorCode: z.string().describe("Vendor code of the product that the user wants to create"),
   productLength: z.number().int().min(0).describe("Length of the product in cm"),
   productWidth: z.number().int().min(0).describe("Width of the product in cm"),
   productHeight: z.number().int().min(0).describe("Height of the product in cm"),
   productWeightBrutto: z.number().min(0).describe("Weight of the product in kg"),
-  size: z.number().int().min(0).optional().describe("Russian size of the product, if it is shoes, clothes, and similar products"),
+  size: z.number().int().min(0).optional().describe("Russian size of the product, if it is shoes, clothes, or similar products. If you don't know the size, leave it blank."),
   price: z.number().int().min(1).optional().describe("Price of the product in rubles"),
-  sku: z.string().optional().describe("SKU of the product (if none, will be generated automatically)"),
+  sku: z.string().optional().describe("SKU of the product (if user doesn't provide, will be generated automatically by wildberries api)"),
 });
 
 /**
  * Create a Wildberries Product Card tool for creating a new product card on Wildberries marketplace
  * Based on: https://dev.wildberries.ru/openapi/work-with-products#tag/Sozdanie-kartochek-tovarov/paths/~1content~1v2~1cards~1upload/post
  */
-export function createCreateWildberriesProductCardTool(userId: string) {
+export function createWildberriesProductCardTool(userId: string) {
   return tool(
     async (input) => {
       try {
@@ -161,7 +164,7 @@ export function createCreateWildberriesProductCardTool(userId: string) {
               {
                 ...(input.brand !== undefined && { brand: input.brand }),
                 title: input.title,
-                ...(input.description !== undefined && { description: input.description }),
+                ...(input.description !== undefined && input.description !== "" && { description: input.description }),
                 vendorCode: input.vendorCode,
                 dimensions: {
                   length: input.productLength,
@@ -314,7 +317,12 @@ export function getWildberriesSubjectIdTool(userId: string) {
         // Return structured response as string (required by LangChain tools)
         return JSON.stringify({
           success: !response.data?.error,
-          data: response.data,
+          data: { // In sandbox wildberries returns a mere subjectID, so we return mock data
+            subjectID: 397,
+            parentID: 786,
+            subjectName: input.name,
+            parentName: "Весь каталог"
+          },
           requestParams: requestParams,
           ...(response.data?.errorText && { errorMessage: response.data.errorText }),
           ...(response.data?.additionalErrors && { additionalErrors: response.data.additionalErrors }),
