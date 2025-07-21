@@ -3,6 +3,7 @@ import { z } from 'zod';
 import axios from 'axios';
 import logger from '../../../shared/utils/logger';
 import { getWildberriesApiKey, handleWildberriesError } from '../wildberries.service';
+import { adjustProductDescription } from '../../../shared/utils/text-processing.utils';
 
 export const wildberriesToolsMessages = {
   get_wildberries_seller_product_cards: {
@@ -125,10 +126,7 @@ const createWildberriesProductCardSchema = z.object({
   subjectId: z.number().int().min(1).describe("Subject ID from Wildberries API of the product"),
   brand: z.string().optional().describe("Brand of the product"),
   title: z.string().describe("Title of the product"),
-  description: z.string().refine(
-    (val) => val === "" || (val.length >= 1000 && val.length <= 5000),
-    { message: "Description must be either empty or between 1000-5000 characters" }
-  ).optional().describe("Description of the product. Must be either empty or between 1000-5000 characters."),
+  description: z.string().optional().describe("Description of the product. Must be between 1000-5000 characters."),
   vendorCode: z.string().describe("Vendor code of the product that the user wants to create"),
   productLength: z.number().int().min(0).describe("Length of the product in cm"),
   productWidth: z.number().int().min(0).describe("Width of the product in cm"),
@@ -156,6 +154,21 @@ export function createWildberriesProductCardTool(userId: string) {
           });
         }
 
+        // Adjust description to meet Wildberries requirements
+        const adjustedDescription = input.description ? 
+          adjustProductDescription(input.description, input.title) : 
+          "";
+
+        // Log description adjustment if it occurred
+        if (input.description && input.description !== adjustedDescription) {
+          logger.info('Product description was adjusted to meet Wildberries requirements', {
+            userId,
+            originalLength: input.description.length,
+            adjustedLength: adjustedDescription.length,
+            productTitle: input.title
+          });
+        }
+
         // Build request body from validated input
         const requestBody = [
           {
@@ -164,7 +177,7 @@ export function createWildberriesProductCardTool(userId: string) {
               {
                 ...(input.brand !== undefined && { brand: input.brand }),
                 title: input.title,
-                ...(input.description !== undefined && input.description !== "" && { description: input.description }),
+                ...(adjustedDescription !== "" && { description: adjustedDescription }),
                 vendorCode: input.vendorCode,
                 dimensions: {
                   length: input.productLength,

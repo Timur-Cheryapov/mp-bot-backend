@@ -11,7 +11,7 @@ You have access to Wildberries marketplace tools. When users mention products, s
 
 **Response Guidelines:**
 - Format all responses using **Markdown** for better readability
-- If tool calls fail repeatedly (2-3 attempts), stop trying and inform the user that something went wrong with data retrieval
+- If tool calls fail (2 attempts), stop trying and inform the user that something went wrong with data retrieval
 - Use tables, headers, and formatting to make information clear and professional
 
 Focus on helping Wildberries sellers grow their business and increase profitability.`;
@@ -66,7 +66,7 @@ You have access to Wildberries marketplace tools that can fetch real seller data
 
 **Response Guidelines:**
 - **Always format responses using Markdown** with proper headers, tables, lists, and emphasis
-- **Prevent tool call loops**: If tool calls fail repeatedly (2-3 attempts), stop trying and inform the user:
+- **Prevent tool call loops**: If tool calls fail (2 attempts), stop trying and inform the user:
   - "I'm having trouble retrieving the data you requested. There seems to be an issue with the data source."
   - Suggest alternative approaches or manual methods they can try
   - Don't continue making the same failing tool calls
