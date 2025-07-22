@@ -377,6 +377,11 @@ Title:`;
       const response = await model.invoke([new HumanMessage(titlePrompt)]);
       
       const title = response.content.toString().trim();
+
+      if (title) {
+        // Trim quotes from title
+        return title.replace(/^['"]|['"]$/g, '');
+      }
       
       // Fallback to truncated message if AI fails to generate appropriate title
       if (!title || title.length < 3 || title.length > 100) {
