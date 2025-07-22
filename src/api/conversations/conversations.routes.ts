@@ -2,12 +2,14 @@ import express, { Request, Response } from 'express';
 import { asyncHandler, authenticate } from '../../shared/middleware';
 import * as databaseService from '../../infrastructure/database/database.service';
 import * as conversationService from '../../core/conversations/conversations.service';
+import { getLangChainService } from '../../core/ai/langchain.service';
 import { Conversation } from '../../infrastructure/database/supabase.client';
 import { convertConversationToUi, convertMessageToUi } from '../../shared/utils/ui-converters';
 import { handleErrorResponse, validateRequiredFields } from '../../shared/utils/response-handlers';
 import { handleStreamingResponse } from '../../core/conversations/streaming.utils';
 import { BadRequestError, NotFoundError } from '../../shared/utils/errors';
 import { WILDBERRIES_SYSTEM_PROMPT } from '../../core/ai/prompts';
+import logger from '../../shared/utils/logger';
 
 // Extend the Express Request type to include the conversation property
 declare global {
@@ -121,11 +123,24 @@ router.post(['/', '/:conversationId'], asyncHandler(async (req: Request, res: Re
       // Use existing conversation's system prompt, or provided one as fallback
       finalSystemPrompt = conversation.system_prompt || systemPrompt;
     } else {
-      // Create new conversation
+      // Generate conversation title from user message
+      let conversationTitle = title || 'New Conversation'; // Fallback to default
+      
+      try {
+        if (message && message.trim().length > 0) {
+          const langchainService = getLangChainService();
+          conversationTitle = await langchainService.generateConversationTitle(message);
+        }
+      } catch (error) {
+        logger.warn(`Failed to generate conversation title, using fallback: ${error instanceof Error ? error.message : String(error)}`);
+        // Continue with fallback title
+      }
+      
+      // Create new conversation with AI-generated title
       conversation = await conversationService.getOrCreateConversation(
         userId,
         null,
-        title,
+        conversationTitle,
         systemPrompt
       );
       
@@ -144,7 +159,7 @@ router.post(['/', '/:conversationId'], asyncHandler(async (req: Request, res: Re
     
     // Handle streaming response
     if (stream) {
-      await handleStreamingResponse(res, result, conversation.id);
+      await handleStreamingResponse(res, result, convertConversationToUi(conversation));
       return;
     }
     

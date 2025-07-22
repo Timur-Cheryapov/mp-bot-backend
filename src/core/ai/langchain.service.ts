@@ -360,6 +360,42 @@ class LangChainService {
     }
   }
 
+  public async generateConversationTitle(userMessage: string): Promise<string> {
+    try {
+      const model = this.createChatModel({ 
+        modelName: MODEL_CONFIGS.GPT4O_MINI, 
+        temperature: 0.3, // Lower temperature for more consistent titles
+        maxTokens: 50 // Short titles only
+      });
+
+      const titlePrompt = `Generate a concise, descriptive title (max 6 words) for a conversation that starts with this user message. Return only the title, no quotes or extra text.
+
+User message: "${userMessage}"
+
+Title:`;
+
+      const response = await model.invoke([new HumanMessage(titlePrompt)]);
+      
+      const title = response.content.toString().trim();
+      
+      // Fallback to truncated message if AI fails to generate appropriate title
+      if (!title || title.length < 3 || title.length > 100) {
+        return userMessage.length > 50 
+          ? `${userMessage.substring(0, 47)}...`
+          : userMessage;
+      }
+      
+      return title;
+    } catch (error) {
+      logger.warn(`Failed to generate conversation title: ${error instanceof Error ? error.message : String(error)}`);
+      
+      // Fallback to truncated user message
+      return userMessage.length > 50 
+        ? `${userMessage.substring(0, 47)}...`
+        : userMessage;
+    }
+  }
+
   private async handleStreamingResponse(
     systemPrompt: string,
     messages: BasicMessage[],

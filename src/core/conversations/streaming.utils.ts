@@ -3,6 +3,7 @@ import { setupStreamingHeaders, sendServerSentEvent } from '../../shared/utils/s
 import { Readable } from 'stream';
 import logger from '../../shared/utils/logger';
 import { AIMessageChunk } from '@langchain/core/messages';
+import { ConversationUi } from '../../shared/types/conversation.types';
 
 /**
  * Handles streaming response from AI service
@@ -14,11 +15,11 @@ import { AIMessageChunk } from '@langchain/core/messages';
 export async function handleStreamingResponse(
   res: ExpressResponse, 
   aiResponse: any, 
-  conversationId: string
+  conversation: ConversationUi
 ): Promise<void> {
   try {
     setupStreamingHeaders(res);
-    sendServerSentEvent(res, 'conversationId', conversationId);
+    sendServerSentEvent(res, 'conversationCreated', JSON.stringify(conversation)); // Send the conversation object to the client
     
     // Check if aiResponse.response is a Response object with a body
     if (aiResponse.response instanceof Response) {
