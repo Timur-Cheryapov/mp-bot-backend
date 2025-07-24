@@ -4,6 +4,22 @@ import { BasicMessage } from "../../shared/types/message.types";
 import { convertToLangChainMessages } from "../conversations/message.utils";
 
 /**
+ * Estimate token count for a given text using a simple approximation
+ * This is a fallback when actual token usage isn't available from the API
+ * @param text The text to estimate tokens for
+ * @returns Estimated token count
+ */
+export function estimateTokenCount(text: string): number {
+  if (!text || typeof text !== 'string') {
+    return 0;
+  }
+  
+  // Simple approximation: 1 token ≈ 4 characters for most models
+  // This is a rough estimate and may not be accurate for all models
+  return Math.ceil(text.length / 4);
+}
+
+/**
  * Format messages from SystemMessage, HumanMessage, AIMessage to a basic format
  * @param messages Array of messages
  * @returns basicly formatted messages

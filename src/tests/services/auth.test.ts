@@ -1,7 +1,7 @@
 import { authService, SignupData, LoginData } from '../../core/auth/auth.service';
 
 // Mock the Supabase client
-jest.mock('../../services/supabase', () => {
+jest.mock('../../infrastructure/database/supabase.client', () => {
   const mockClient = {
     auth: {
       signUp: jest.fn(),
@@ -19,7 +19,7 @@ jest.mock('../../services/supabase', () => {
 });
 
 // Mock logger
-jest.mock('../../utils/logger', () => ({
+jest.mock('../../shared/utils/logger', () => ({
   info: jest.fn(),
   error: jest.fn(),
   warn: jest.fn(),
@@ -30,7 +30,7 @@ describe('Auth Service', () => {
   
   beforeEach(() => {
     jest.clearAllMocks();
-    mockSupabaseClient = require('../../services/supabase').getSupabaseClient();
+    mockSupabaseClient = require('../../infrastructure/database/supabase.client').getSupabaseClient();
   });
   
   describe('signup', () => {

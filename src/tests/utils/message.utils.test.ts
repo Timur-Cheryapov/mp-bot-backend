@@ -1,9 +1,11 @@
 import { 
-  convertToLangChainMessages, 
+  convertToLangChainMessages
+} from '../../core/conversations/message.utils';
+import { 
   SIMPLE_SYSTEM_PROMPT, 
   WILDBERRIES_SYSTEM_PROMPT,
   WILDBERRIES_EXTENDED_SYSTEM_PROMPT 
-} from '../../shared/utils/messageUtils';
+} from '../../core/ai/prompts';
 import { HumanMessage, AIMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
 
 describe('Message Utils', () => {

@@ -3,7 +3,7 @@ import { authController } from '../../api/auth/auth.controller';
 import { authenticate, trackLoginAttempts } from '../../shared/middleware/auth.middleware';
 
 // Mock auth controller
-jest.mock('../../controllers/auth.controller', () => ({
+jest.mock('../../api/auth/auth.controller', () => ({
   authController: {
     signup: jest.fn().mockImplementation((req: any, res: any) => res.status(201).json({ message: 'User registered' })),
     login: jest.fn().mockImplementation((req: any, res: any) => res.status(200).json({ message: 'Login successful' })),
@@ -14,7 +14,7 @@ jest.mock('../../controllers/auth.controller', () => ({
 }));
 
 // Mock auth middleware
-jest.mock('../../middleware/auth', () => ({
+jest.mock('../../shared/middleware/auth.middleware', () => ({
   authenticate: jest.fn().mockImplementation((req: any, res: any, next: any) => next()),
   trackLoginAttempts: jest.fn().mockImplementation((req: any, res: any, next: any) => next()),
   requireAdmin: jest.fn().mockImplementation((req: any, res: any, next: any) => next()),
@@ -22,7 +22,7 @@ jest.mock('../../middleware/auth', () => ({
 }));
 
 // Mock validator middleware
-jest.mock('../../middleware/validator', () => ({
+jest.mock('../../shared/middleware/validator.middleware', () => ({
   validate: jest.fn().mockReturnValue((req: any, res: any, next: any) => next())
 }));
 

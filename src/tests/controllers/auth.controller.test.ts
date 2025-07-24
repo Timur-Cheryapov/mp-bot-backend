@@ -3,7 +3,7 @@ import { authController } from '../../api/auth/auth.controller';
 import { authService } from '../../core/auth/auth.service';
 
 // Mock the auth service
-jest.mock('../../services/auth', () => ({
+jest.mock('../../core/auth/auth.service', () => ({
   authService: {
     signup: jest.fn(),
     login: jest.fn(),
@@ -14,7 +14,7 @@ jest.mock('../../services/auth', () => ({
 }));
 
 // Mock the logger
-jest.mock('../../utils/logger', () => ({
+jest.mock('../../shared/utils/logger', () => ({
   info: jest.fn(),
   error: jest.fn(),
   warn: jest.fn(),

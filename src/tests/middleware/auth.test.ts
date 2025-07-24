@@ -4,12 +4,12 @@ import { UnauthorizedError, ForbiddenError } from '../../shared/utils/errors';
 import { getSupabaseClient } from '../../infrastructure/database/supabase.client';
 
 // Mock Supabase client
-jest.mock('../../services/supabase', () => ({
+jest.mock('../../infrastructure/database/supabase.client', () => ({
   getSupabaseClient: jest.fn(),
 }));
 
 // Mock logger
-jest.mock('../../utils/logger', () => ({
+jest.mock('../../shared/utils/logger', () => ({
   info: jest.fn(),
   error: jest.fn(),
   warn: jest.fn(),

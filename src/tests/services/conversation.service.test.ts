@@ -5,7 +5,7 @@ import {
 } from '../../core/conversations/conversations.service';
 
 // Mock the database service
-jest.mock('../../services/database', () => ({
+jest.mock('../../infrastructure/database/database.service', () => ({
   getConversationById: jest.fn(),
   createConversation: jest.fn(),
   createMessage: jest.fn(),
@@ -13,7 +13,7 @@ jest.mock('../../services/database', () => ({
 }));
 
 // Mock the langchain service
-jest.mock('../../services/langchain', () => ({
+jest.mock('../../core/ai/langchain.service', () => ({
   getLangChainService: jest.fn(() => ({
     generateConversationResponse: jest.fn()
   }))

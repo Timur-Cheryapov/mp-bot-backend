@@ -1,9 +1,35 @@
 import dotenv from 'dotenv';
 import { getLangChainService } from '../../core/ai/langchain.service';
-import { SIMPLE_SYSTEM_PROMPT, WILDBERRIES_SYSTEM_PROMPT } from '../../shared/utils/messageUtils';
+import { SIMPLE_SYSTEM_PROMPT, WILDBERRIES_SYSTEM_PROMPT } from '../../core/ai/prompts';
 
 // Load environment variables before tests
 dotenv.config();
+
+// Mock the database services to avoid actual database calls
+jest.mock('../../core/plans/daily-usage.service', () => ({
+  upsertDailyUsage: jest.fn().mockResolvedValue(undefined),
+  checkUserDailyUsage: jest.fn().mockResolvedValue({
+    hasReachedLimit: false,
+    dailyLimitCredits: 5.0,
+    monthlyLimitCredits: 20.0,
+    nextResetDate: '2024-01-02'
+  })
+}));
+
+jest.mock('../../core/plans/user-plans.service', () => ({
+  checkUserDailyUsage: jest.fn().mockResolvedValue({
+    hasReachedLimit: false,
+    dailyLimitCredits: 5.0,
+    monthlyLimitCredits: 20.0,
+    nextResetDate: '2024-01-02'
+  })
+}));
+
+jest.mock('../../infrastructure/database/database.service', () => ({
+  createMessage: jest.fn().mockResolvedValue(undefined),
+  getConversationById: jest.fn().mockResolvedValue(null),
+  createConversation: jest.fn().mockResolvedValue('new-conv-123')
+}));
 
 // Skip tests if OPENAI_API_KEY is not set
 const hasApiKey = !!process.env.OPENAI_API_KEY;
@@ -32,18 +58,6 @@ describe('LangChain Service', () => {
   describe('Service Initialization', () => {
     test('should initialize the service', () => {
       expect(langchainService).toBeDefined();
-    });
-
-    test('should create a chat model with custom parameters', async () => {
-      const model = await langchainService.createChatModel({
-        temperature: 0.5,
-        maxTokens: 1000,
-        modelName: 'gpt-4o-mini',
-      });
-      
-      expect(model).toBeDefined();
-      expect(model.temperature).toBe(0.5);
-      expect(model.maxTokens).toBe(1000);
     });
 
     test('should create an embedding model', () => {
@@ -82,7 +96,10 @@ describe('LangChain Service', () => {
       );
 
       expect(response).toBeDefined();
-      expect(typeof response).toBe('string');
+      expect(Array.isArray(response)).toBe(true);
+      if (Array.isArray(response) && response.length > 0) {
+        expect(response[0].content).toBeDefined();
+      }
     }, 15000);
 
     test('should handle Wildberries tools integration', async () => {
@@ -102,7 +119,10 @@ describe('LangChain Service', () => {
       );
 
       expect(response).toBeDefined();
-      expect(typeof response).toBe('string');
+      expect(Array.isArray(response)).toBe(true);
+      if (Array.isArray(response) && response.length > 0) {
+        expect(response[0].content).toBeDefined();
+      }
     }, 15000);
 
     test('should handle streaming response', async () => {

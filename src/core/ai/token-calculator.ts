@@ -51,7 +51,7 @@ export function extractTokenUsage(
     outputTokens = usageMetadata.output_tokens;
   } else {
     // Fall back to estimation
-    const { estimateTokenCount } = require('./langchainUtils');
+    const { estimateTokenCount } = require('./langchain.utils');
     const inputText = [systemPrompt, ...messages.map(m => m.content)].join('\n');
     const outputText = responseAI.content?.toString() || '';
     inputTokens = estimateTokenCount(inputText);

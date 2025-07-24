@@ -1,7 +1,7 @@
 import { 
-  validateWildberriesToolsRequirements, 
-  validateApiKey 
-} from '../../shared/utils/validation.utils';
+  validateWildberriesToolsRequirements
+} from '../../core/tools/validation.utils';
+import { validateApiKey } from '../../shared/utils/validation.utils';
 
 describe('Validation Utils', () => {
   describe('validateWildberriesToolsRequirements', () => {
@@ -39,19 +39,19 @@ describe('Validation Utils', () => {
 
     test('should throw error when API key is undefined', () => {
       expect(() => validateApiKey(undefined)).toThrow(
-        'OpenAI API key is not defined in environment variables'
+        'API key is required'
       );
     });
 
     test('should throw error when API key is empty string', () => {
       expect(() => validateApiKey('')).toThrow(
-        'OpenAI API key is not defined in environment variables'
+        'API key is required'
       );
     });
 
     test('should throw error when API key is null', () => {
       expect(() => validateApiKey(null as any)).toThrow(
-        'OpenAI API key is not defined in environment variables'
+        'API key is required'
       );
     });
   });
