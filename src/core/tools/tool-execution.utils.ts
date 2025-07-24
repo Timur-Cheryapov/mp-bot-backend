@@ -1,6 +1,6 @@
 import { ToolMessage } from '@langchain/core/messages';
 import { ToolCall } from '@langchain/core/dist/messages/tool';
-import { createWildberriesProductCardTool, getWildberriesSellerProductCardsTool, getWildberriesSubjectIdTool, wildberriesToolsMessages } from './product/listing-tools';
+import { createWildberriesProductCardTool, getWildberriesSellerProductCardsTool, getWildberriesSellerProductsWithPriceTool, getWildberriesSubjectIdTool, setWildberriesProductsPriceTool, updateWildberriesProductCardTool, wildberriesToolsMessages } from './product/listing-tools';
 import logger from '../../shared/utils/logger';
 
 export interface ToolExecutionResult {
@@ -20,7 +20,10 @@ export function createToolsMap(userId?: string): Record<string, any> {
       const listingTools = [
         getWildberriesSellerProductCardsTool(userId),
         createWildberriesProductCardTool(userId),
+        updateWildberriesProductCardTool(userId),
         getWildberriesSubjectIdTool(userId),
+        setWildberriesProductsPriceTool(userId),
+        getWildberriesSellerProductsWithPriceTool(userId),
       ];
       toolsByName[LISTING_TOOLS_NAME] = listingTools;
     } catch (error) {
