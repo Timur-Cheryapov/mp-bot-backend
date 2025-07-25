@@ -4,6 +4,10 @@
 
 MP Bot Backend is a TypeScript/Express.js application that provides AI-powered marketplace business assistance, specifically designed for Wildberries sellers. The application integrates LangChain for AI capabilities, Supabase for data persistence, and provides comprehensive APIs for user management, conversations, and marketplace tools.
 
+This is a backend for the project [MP Bot](https://timur-cheryapov.github.io/mp-bot/index.html). Frontend version can be seen via this [link](https://github.com/Timur-Cheryapov/mp-bot-frontend).
+
+<img width="1977" height="1243" alt="conversation-flow" src="https://github.com/user-attachments/assets/739a4382-2185-4aad-babb-2b9d77dcf426" />
+
 ## Architecture
 
 ```
